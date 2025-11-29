@@ -19,6 +19,8 @@ Outbound, ARI-driven call-control engine for a language academy marketing campai
 6. Prompts live in-repo under `assets/audio/` (mp3 sources and 16 kHz mono wav). To install them on Asterisk run (with the right permissions) `bash scripts/sync_audio.sh` which copies wavs to `/var/lib/asterisk/sounds/custom/` as `hello`, `goodby`, `second` (override target with `AST_SOUND_DIR`).
 7. Run: `python main.py` (startup will auto-convert mp3→wav and sync prompts to Asterisk).
 
+Note: Ensure `AST_SOUND_DIR` points to your actual Asterisk custom sounds path (e.g., `/var/lib/asterisk/sounds/custom` or `/var/lib/asterisk/sounds/en/custom`). The app will try to sync to both base and `en/custom` when possible. If permissions block copying, run as a user with rights or pre-create the directories.
+
 ## Configuration
 Set via environment or `.env`:
 - ARI: `ARI_BASE_URL`, `ARI_WS_URL`, `ARI_APP_NAME`, `ARI_USERNAME`, `ARI_PASSWORD`

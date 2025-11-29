@@ -21,7 +21,6 @@ def ensure_audio_assets(settings: AudioSettings) -> None:
     ast_dir = Path(settings.ast_sound_dir)
 
     wav_dir.mkdir(parents=True, exist_ok=True)
-    ast_dir.mkdir(parents=True, exist_ok=True)
 
     if not shutil.which("ffmpeg"):
         logger.warning("ffmpeg not found; skipping audio conversion")
@@ -30,7 +29,14 @@ def ensure_audio_assets(settings: AudioSettings) -> None:
             wav_path = wav_dir / f"{mp3_path.stem}.wav"
             _convert_mp3_to_wav(mp3_path, wav_path)
 
-    _copy_wavs_to_asterisk(wav_dir, ast_dir)
+    try:
+        _copy_wavs_to_asterisk(wav_dir, ast_dir)
+    except PermissionError:
+        logger.warning(
+            "Permission denied copying audio into %s. "
+            "Run with sufficient privileges or set AST_SOUND_DIR to a writable path.",
+            ast_dir,
+        )
 
 
 def _convert_mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
@@ -57,19 +63,47 @@ def _convert_mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
 
 
 def _copy_wavs_to_asterisk(wav_dir: Path, ast_dir: Path) -> None:
-    targets = [ast_dir]
-    # If the target is .../custom and an /en/custom sibling exists or is creatable, sync there too.
-    if ast_dir.name == "custom":
-        lang_dir = ast_dir.parent / "en" / "custom"
-        targets.append(lang_dir)
+    targets = _build_target_dirs(ast_dir)
 
     for wav_path in wav_dir.glob("*.wav"):
         for target_dir in targets:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target = target_dir / wav_path.name
             try:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                target = target_dir / wav_path.name
                 shutil.copy2(wav_path, target)
                 os.chmod(target, 0o644)
                 logger.info("Synced prompt %s to %s", wav_path.name, target)
+            except PermissionError:
+                logger.warning(
+                    "Permission denied copying %s to %s. "
+                    "Run with sufficient privileges or adjust AST_SOUND_DIR.",
+                    wav_path,
+                    target_dir,
+                )
             except Exception as exc:
-                logger.warning("Failed to copy %s to %s: %s", wav_path, target, exc)
+                logger.warning("Failed to copy %s to %s: %s", wav_path, target_dir, exc)
+
+
+def _build_target_dirs(ast_dir: Path) -> set[Path]:
+    """
+    Build a set of target directories:
+    - Always includes ast_dir
+    - If ast_dir is language-specific (e.g., .../en/custom), also include base .../custom
+    - If ast_dir is base .../custom, also include .../en/custom
+    """
+    targets: set[Path] = {ast_dir}
+    if ast_dir.name != "custom":
+        return targets
+
+    parent = ast_dir.parent
+    # If parent looks like a language code (length 2 or 'en'), add base custom and en/custom
+    if len(parent.name) == 2 or parent.name.lower() == "en":
+        base_custom = parent.parent / "custom"
+        targets.add(base_custom)
+        en_custom = parent.parent / "en" / "custom"
+        targets.add(en_custom)
+    else:
+        en_custom = parent / "en" / "custom"
+        targets.add(en_custom)
+
+    return targets
