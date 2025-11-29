@@ -1,0 +1,172 @@
+import os
+from dataclasses import dataclass
+from datetime import time
+from typing import List
+
+
+def _load_dotenv(path: str = ".env") -> None:
+    """
+    Minimal .env loader using only the standard library.
+    Existing environment variables are not overridden.
+    """
+    if not os.path.exists(path):
+        return
+
+    with open(path, encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key not in os.environ:
+                os.environ[key] = value
+
+
+def _parse_time(value: str, default: time) -> time:
+    try:
+        hour, minute = value.split(":")
+        return time(int(hour), int(minute))
+    except Exception:
+        return default
+
+
+def _parse_list(value: str) -> List[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+@dataclass
+class AriSettings:
+    base_url: str
+    ws_url: str
+    app_name: str
+    username: str
+    password: str
+
+
+@dataclass
+class GapGPTSettings:
+    base_url: str
+    api_key: str
+
+
+@dataclass
+class ViraSettings:
+    token: str
+    stt_token: str
+    tts_token: str
+    stt_url: str
+    tts_url: str
+
+
+@dataclass
+class AudioSettings:
+    src_dir: str
+    wav_dir: str
+    ast_sound_dir: str
+
+
+@dataclass
+class OperatorSettings:
+    extension: str
+    trunk: str
+    caller_id: str
+    timeout: int
+
+
+@dataclass
+class DialerSettings:
+    outbound_trunk: str
+    default_caller_id: str
+    origination_timeout: int
+    max_concurrent_calls: int
+    max_calls_per_minute: int
+    max_calls_per_day: int
+    call_window_start: time
+    call_window_end: time
+    static_contacts: List[str]
+
+
+@dataclass
+class Settings:
+    ari: AriSettings
+    gapgpt: GapGPTSettings
+    vira: ViraSettings
+    dialer: DialerSettings
+    operator: OperatorSettings
+    audio: AudioSettings
+    log_level: str
+
+
+def get_settings() -> Settings:
+    _load_dotenv()
+
+    ari = AriSettings(
+        base_url=os.getenv("ARI_BASE_URL", "http://127.0.0.1:8088/ari"),
+        ws_url=os.getenv("ARI_WS_URL", "ws://127.0.0.1:8088/ari/events"),
+        app_name=os.getenv("ARI_APP_NAME", "salehi"),
+        username=os.getenv("ARI_USERNAME", "salehi"),
+        password=os.getenv("ARI_PASSWORD", "changeme"),
+    )
+
+    gapgpt = GapGPTSettings(
+        base_url=os.getenv("GAPGPT_BASE_URL", "https://api.gapgpt.app/v1"),
+        api_key=os.getenv("GAPGPT_API_KEY", ""),
+    )
+
+    vira = ViraSettings(
+        token=os.getenv("VIRA_TOKEN", ""),
+        stt_token=os.getenv("VIRA_STT_TOKEN", os.getenv("VIRA_TOKEN", "")),
+        tts_token=os.getenv("VIRA_TTS_TOKEN", os.getenv("VIRA_TOKEN", "")),
+        stt_url=os.getenv(
+            "VIRA_STT_URL", "https://partai.gw.isahab.ir/avanegar/v2/avanegar/request"
+        ),
+        tts_url=os.getenv(
+            "VIRA_TTS_URL", "https://partai.gw.isahab.ir/avasho/v2/avasho/request"
+        ),
+    )
+
+    call_window_start = _parse_time(
+        os.getenv("CALL_WINDOW_START", "08:00"), default=time(8, 0)
+    )
+    call_window_end = _parse_time(
+        os.getenv("CALL_WINDOW_END", "20:00"), default=time(20, 0)
+    )
+
+    dialer = DialerSettings(
+        outbound_trunk=os.getenv("OUTBOUND_TRUNK", "TO-CUCM-Gaptel"),
+        default_caller_id=os.getenv("DEFAULT_CALLER_ID", "1000"),
+        origination_timeout=int(os.getenv("ORIGINATION_TIMEOUT", "30")),
+        max_concurrent_calls=int(os.getenv("MAX_CONCURRENT_CALLS", "2")),
+        max_calls_per_minute=int(os.getenv("MAX_CALLS_PER_MINUTE", "10")),
+        max_calls_per_day=int(os.getenv("MAX_CALLS_PER_DAY", "200")),
+        call_window_start=call_window_start,
+        call_window_end=call_window_end,
+        static_contacts=_parse_list(
+            os.getenv("STATIC_CONTACTS", "+989000000000")
+        ),
+    )
+
+    operator = OperatorSettings(
+        extension=os.getenv("OPERATOR_EXTENSION", "200"),
+        trunk=os.getenv("OPERATOR_TRUNK", os.getenv("OUTBOUND_TRUNK", "TO-CUCM-Gaptel")),
+        caller_id=os.getenv("OPERATOR_CALLER_ID", os.getenv("DEFAULT_CALLER_ID", "1000")),
+        timeout=int(os.getenv("OPERATOR_TIMEOUT", "30")),
+    )
+
+    audio = AudioSettings(
+        src_dir=os.getenv("AUDIO_SRC_DIR", "assets/audio/src"),
+        wav_dir=os.getenv("AUDIO_WAV_DIR", "assets/audio/wav"),
+        ast_sound_dir=os.getenv("AST_SOUND_DIR", "/var/lib/asterisk/sounds/custom"),
+    )
+
+    log_level = os.getenv("LOG_LEVEL", "INFO")
+
+    return Settings(
+        ari=ari,
+        gapgpt=gapgpt,
+        vira=vira,
+        dialer=dialer,
+        operator=operator,
+        audio=audio,
+        log_level=log_level,
+    )
