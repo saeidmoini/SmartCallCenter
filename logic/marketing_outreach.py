@@ -142,14 +142,14 @@ class MarketingScenario(BaseScenario):
                     bridge_id=session.bridge.bridge_id,
                     name=recording_name,
                     max_duration=10,
-                    max_silence=3,
+                    max_silence=2,
                 )
             else:
                 self.ari_client.record_channel(
                     channel_id=channel_id,
                     name=recording_name,
                     max_duration=10,
-                    max_silence=3,
+                    max_silence=2,
                 )
             self.session_manager.register_recording(session.session_id, recording_name)
         except Exception as exc:
@@ -195,7 +195,6 @@ class MarketingScenario(BaseScenario):
     ) -> None:
         time.sleep(0.5)
         try:
-            self._play_processing(session)
             audio_bytes = self.ari_client.fetch_stored_recording(recording_name)
             stt_result: STTResult = transcribe_audio(audio_bytes, self.settings.vira)
             transcript = stt_result.text.strip()
