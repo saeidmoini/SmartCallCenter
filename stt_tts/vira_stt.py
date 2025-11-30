@@ -22,8 +22,9 @@ def transcribe_audio(
     audio_bytes: bytes,
     settings: ViraSettings,
     language_model: str = "default",
+    hotwords: Optional[list[str]] = None,
 ) -> STTResult:
-    token = settings.stt_token or settings.token
+    token = settings.stt_token
     if not token:
         logger.warning("Vira STT token is missing; STT call skipped.")
         return STTResult(status="unauthorized", text="")
@@ -35,25 +36,32 @@ def transcribe_audio(
     files = {
         "audio": ("audio.wav", audio_bytes, "audio/wav"),
     }
-    data = {
-        "model": language_model,
-        "srt": "false",
-        "inverseNormalizer": "false",
-        "timestamp": "false",
-        "spokenPunctuation": "true",
-        "punctuation": "true",
-        "numSpeakers": "1",
-        "diarize": "false",
-    }
+    data_list = [
+        ("model", language_model),
+        ("srt", "false"),
+        ("inverseNormalizer", "false"),
+        ("timestamp", "false"),
+        ("spokenPunctuation", "false"),
+        ("punctuation", "false"),
+        ("numSpeakers", "0"),
+        ("diarize", "false"),
+    ]
+    if hotwords:
+        for word in hotwords:
+            data_list.append(("hotwords[]", word))
 
     response = requests.post(
         settings.stt_url,
         headers=headers,
-        data=data,
+        data=data_list,
         files=files,
         timeout=30,
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError:
+        logger.error("Vira STT HTTP error %s: %s", response.status_code, response.text)
+        raise
     payload = response.json()
     text = payload.get("data", {}).get("text", "")
     status = payload.get("status", "unknown")
