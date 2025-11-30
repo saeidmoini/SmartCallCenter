@@ -163,6 +163,11 @@ class SessionManager:
             self._ensure_bridge(session)
             if session.bridge and channel_id:
                 self.ari_client.add_channel_to_bridge(session.bridge.bridge_id, channel_id)
+            # Auto-answer inbound leg to run the same scenario as outbound.
+            try:
+                self.ari_client.answer_channel(channel_id)
+            except Exception as exc:
+                logger.warning("Failed to answer inbound channel %s: %s", channel_id, exc)
             self._maybe_mark_answered(session, session.inbound_leg, channel_state)
             self.scenario_handler.on_inbound_channel_created(session)
             logger.info("Inbound channel %s created session %s", channel_id, session_id)
