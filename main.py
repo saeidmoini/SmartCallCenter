@@ -1,5 +1,6 @@
+import asyncio
 import logging
-import time
+import signal
 
 from config import get_settings
 from core.ari_client import AriClient
@@ -8,6 +9,8 @@ from llm.client import GapGPTClient
 from logic.dialer import Dialer
 from logic.marketing_outreach import MarketingScenario
 from sessions.session_manager import SessionManager
+from stt_tts.vira_stt import ViraSTTClient
+from stt_tts.vira_tts import ViraTTSClient
 from utils.audio_sync import ensure_audio_assets
 
 
@@ -18,36 +21,80 @@ def configure_logging(level: str) -> None:
     )
 
 
-def main() -> None:
+async def async_main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     logger = logging.getLogger("app")
 
-    # Ensure audio assets are converted and available to Asterisk.
-    ensure_audio_assets(settings.audio)
+    # Ensure audio assets are converted and available to Asterisk without blocking the loop.
+    await asyncio.to_thread(ensure_audio_assets, settings.audio)
 
-    ari_client = AriClient(settings.ari)
-    llm_client = GapGPTClient(settings.gapgpt)
+    stt_semaphore = asyncio.Semaphore(settings.concurrency.max_parallel_stt)
+    tts_semaphore = asyncio.Semaphore(settings.concurrency.max_parallel_tts)
+    llm_semaphore = asyncio.Semaphore(settings.concurrency.max_parallel_llm)
+
+    ari_client = AriClient(
+        settings.ari,
+        timeout=settings.timeouts.ari_timeout,
+        max_connections=settings.concurrency.http_max_connections,
+    )
+    stt_client = ViraSTTClient(
+        settings.vira,
+        timeout=settings.timeouts.stt_timeout,
+        max_connections=settings.concurrency.http_max_connections,
+        semaphore=stt_semaphore,
+    )
+    tts_client = ViraTTSClient(
+        settings.vira,
+        timeout=settings.timeouts.tts_timeout,
+        max_connections=settings.concurrency.http_max_connections,
+        semaphore=tts_semaphore,
+    )
+    llm_client = GapGPTClient(
+        settings.gapgpt,
+        timeout=settings.timeouts.llm_timeout,
+        max_connections=settings.concurrency.http_max_connections,
+        semaphore=llm_semaphore,
+    )
     session_manager = SessionManager(ari_client, None)  # placeholder to allow scenario access
-    scenario = MarketingScenario(settings, ari_client, llm_client, session_manager)
+    scenario = MarketingScenario(settings, ari_client, llm_client, stt_client, session_manager)
     session_manager.scenario_handler = scenario
     dialer = Dialer(settings, ari_client, session_manager)
     scenario.attach_dialer(dialer)
 
     ws_client = AriWebSocketClient(settings.ari, session_manager.handle_event)
 
-    logger.info("Starting ARI WebSocket listener and dialer")
-    ws_client.start()
-    dialer.start()
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop_event.set)
+        except NotImplementedError:
+            # Signals not available on some platforms (e.g., Windows).
+            pass
 
+    logger.info("Starting ARI WebSocket listener and dialer")
+    tasks = [
+        asyncio.create_task(ws_client.run()),
+        asyncio.create_task(dialer.run(stop_event)),
+    ]
     try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
-        dialer.stop()
-        ws_client.stop()
+        await stop_event.wait()
+    finally:
+        await ws_client.stop()
+        await dialer.stop()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(
+            ari_client.close(),
+            stt_client.close(),
+            tts_client.close(),
+            llm_client.close(),
+            return_exceptions=True,
+        )
+        logger.info("Shutdown complete")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(async_main())

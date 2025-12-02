@@ -87,6 +87,23 @@ class DialerSettings:
 
 
 @dataclass
+class ConcurrencySettings:
+    max_parallel_stt: int
+    max_parallel_tts: int
+    max_parallel_llm: int
+    http_max_connections: int
+
+
+@dataclass
+class TimeoutSettings:
+    http_timeout: float
+    stt_timeout: float
+    tts_timeout: float
+    llm_timeout: float
+    ari_timeout: float
+
+
+@dataclass
 class Settings:
     ari: AriSettings
     gapgpt: GapGPTSettings
@@ -94,6 +111,8 @@ class Settings:
     dialer: DialerSettings
     operator: OperatorSettings
     audio: AudioSettings
+    concurrency: ConcurrencySettings
+    timeouts: TimeoutSettings
     log_level: str
 
 
@@ -159,6 +178,21 @@ def get_settings() -> Settings:
         ast_sound_dir=os.getenv("AST_SOUND_DIR", "/var/lib/asterisk/sounds/custom"),
     )
 
+    concurrency = ConcurrencySettings(
+        max_parallel_stt=int(os.getenv("MAX_PARALLEL_STT", "50")),
+        max_parallel_tts=int(os.getenv("MAX_PARALLEL_TTS", "50")),
+        max_parallel_llm=int(os.getenv("MAX_PARALLEL_LLM", "10")),
+        http_max_connections=int(os.getenv("HTTP_MAX_CONNECTIONS", "100")),
+    )
+
+    timeouts = TimeoutSettings(
+        http_timeout=float(os.getenv("HTTP_TIMEOUT", "10")),
+        stt_timeout=float(os.getenv("STT_TIMEOUT", "30")),
+        tts_timeout=float(os.getenv("TTS_TIMEOUT", "30")),
+        llm_timeout=float(os.getenv("LLM_TIMEOUT", "20")),
+        ari_timeout=float(os.getenv("ARI_TIMEOUT", "10")),
+    )
+
     log_level = os.getenv("LOG_LEVEL", "INFO")
 
     return Settings(
@@ -168,5 +202,7 @@ def get_settings() -> Settings:
         dialer=dialer,
         operator=operator,
         audio=audio,
+        concurrency=concurrency,
+        timeouts=timeouts,
         log_level=log_level,
     )

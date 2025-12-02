@@ -1,0 +1,32 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.APP_DIR }}"
+            git pull
+            python3 -m venv venv || true
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install --upgrade -r requirements.txt
+            if [ -n "${{ secrets.SERVICE_NAME }}" ]; then
+              sudo systemctl restart "${{ secrets.SERVICE_NAME }}"
+            fi

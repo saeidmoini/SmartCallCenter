@@ -1,8 +1,7 @@
+import asyncio
 import logging
-import threading
-import time
 from collections import deque
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Deque, List, Optional
 
 from config.settings import Settings
@@ -31,49 +30,46 @@ class Dialer:
         self.attempt_timestamps: Deque[datetime] = deque()
         self.daily_counter = 0
         self.daily_marker: date = date.today()
-        self.running = False
-        self.thread: Optional[threading.Thread] = None
-        self.lock = threading.Lock()
+        self._running = False
+        self.lock = asyncio.Lock()
 
-    def start(self) -> None:
-        if self.running:
+    async def run(self, stop_event: asyncio.Event) -> None:
+        if self._running:
             return
-        self.running = True
-        self.thread = threading.Thread(target=self._run_loop, daemon=True)
-        self.thread.start()
+        self._running = True
         logger.info("Dialer started with %d queued contacts", len(self.contacts))
+        try:
+            while not stop_event.is_set() and self._running:
+                self._reset_daily_if_needed()
+                if not self._within_call_window():
+                    await asyncio.sleep(30)
+                    continue
+                if not await self._can_start_call():
+                    await asyncio.sleep(1)
+                    continue
+                contact = await self._next_contact()
+                if not contact:
+                    await asyncio.sleep(5)
+                    continue
+                await self._originate(contact)
+                await asyncio.sleep(0.2)
+        finally:
+            self._running = False
+            logger.info("Dialer stopped")
 
-    def stop(self) -> None:
-        self.running = False
-        if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=5)
+    async def stop(self) -> None:
+        self._running = False
 
-    def add_contacts(self, numbers: List[str]) -> None:
-        with self.lock:
+    async def add_contacts(self, numbers: List[str]) -> None:
+        async with self.lock:
             for number in numbers:
                 clean = number.strip()
                 if clean:
                     self.contacts.append(clean)
         logger.info("Queued %d new contacts", len(numbers))
 
-    def on_session_completed(self, session_id: str) -> None:
+    async def on_session_completed(self, session_id: str) -> None:
         logger.debug("Session %s completed; dialer notified", session_id)
-
-    def _run_loop(self) -> None:
-        while self.running:
-            self._reset_daily_if_needed()
-            if not self._within_call_window():
-                time.sleep(30)
-                continue
-            if not self._can_start_call():
-                time.sleep(1)
-                continue
-            contact = self._next_contact()
-            if not contact:
-                time.sleep(5)
-                continue
-            self._originate(contact)
-            time.sleep(0.2)
 
     def _within_call_window(self) -> bool:
         now = datetime.now().time()
@@ -92,8 +88,9 @@ class Dialer:
             self.daily_marker = today
             self.attempt_timestamps.clear()
 
-    def _can_start_call(self) -> bool:
-        if self.session_manager.active_sessions_count() >= self.settings.dialer.max_concurrent_calls:
+    async def _can_start_call(self) -> bool:
+        current_sessions = await self.session_manager.active_sessions_count()
+        if current_sessions >= self.settings.dialer.max_concurrent_calls:
             return False
 
         self._prune_attempts()
@@ -110,18 +107,18 @@ class Dialer:
         while self.attempt_timestamps and self.attempt_timestamps[0] < cutoff:
             self.attempt_timestamps.popleft()
 
-    def _next_contact(self) -> Optional[str]:
-        with self.lock:
+    async def _next_contact(self) -> Optional[str]:
+        async with self.lock:
             if not self.contacts:
                 return None
             return self.contacts.popleft()
 
-    def _originate(self, contact: str) -> None:
+    async def _originate(self, contact: str) -> None:
         try:
-            session = self.session_manager.create_outbound_session(contact_number=contact)
+            session = await self.session_manager.create_outbound_session(contact_number=contact)
             endpoint = self._build_endpoint(contact)
             app_args = f"outbound,{session.session_id}"
-            self.ari_client.originate_call(
+            await self.ari_client.originate_call(
                 endpoint=endpoint,
                 app_args=app_args,
                 caller_id=self.settings.dialer.default_caller_id,

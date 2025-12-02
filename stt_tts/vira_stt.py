@@ -1,8 +1,9 @@
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Optional
 
-import requests
+import httpx
 
 from config.settings import ViraSettings
 
@@ -18,80 +19,101 @@ class STTResult:
     trace_id: Optional[str] = None
 
 
-def transcribe_audio(
-    audio_bytes: bytes,
-    settings: ViraSettings,
-    language_model: str = "default",
-    hotwords: Optional[list[str]] = None,
-) -> STTResult:
-    token = settings.stt_token
-    if not token:
-        logger.warning("Vira STT token is missing; STT call skipped.")
-        return STTResult(status="unauthorized", text="")
+class ViraSTTClient:
+    """
+    Async Vira STT wrapper with concurrency control.
+    """
 
-    headers = {
-        "gateway-token": token,
-        "accept": "application/json",
-    }
-    files = {
-        "audio": ("audio.wav", audio_bytes, "audio/wav"),
-    }
-    data_list = [
-        ("model", language_model),
-        ("srt", "false"),
-        ("inverseNormalizer", "false"),
-        ("timestamp", "false"),
-        ("spokenPunctuation", "false"),
-        ("punctuation", "false"),
-        ("numSpeakers", "0"),
-        ("diarize", "false"),
-    ]
-    if hotwords:
-        for word in hotwords:
-            data_list.append(("hotwords[]", word))
+    def __init__(
+        self,
+        settings: ViraSettings,
+        timeout: float = 30.0,
+        max_connections: int = 100,
+        semaphore: Optional[asyncio.Semaphore] = None,
+    ):
+        self.settings = settings
+        self.timeout = timeout
+        self.semaphore = semaphore or asyncio.Semaphore(10)
+        limits = httpx.Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=max_connections,
+        )
+        self.client = httpx.AsyncClient(timeout=timeout, limits=limits)
 
-    response = requests.post(
-        settings.stt_url,
-        headers=headers,
-        data=data_list,
-        files=files,
-        timeout=30,
-    )
-    try:
+    async def close(self) -> None:
+        await self.client.aclose()
+
+    async def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        language_model: str = "default",
+        hotwords: Optional[list[str]] = None,
+    ) -> STTResult:
+        token = self.settings.stt_token
+        if not token:
+            logger.warning("Vira STT token is missing; STT call skipped.")
+            return STTResult(status="unauthorized", text="")
+
+        headers = {
+            "gateway-token": token,
+            "accept": "application/json",
+        }
+        files = {
+            "audio": ("audio.wav", audio_bytes, "audio/wav"),
+        }
+        data_list = [
+            ("model", language_model),
+            ("srt", "false"),
+            ("inverseNormalizer", "false"),
+            ("timestamp", "false"),
+            ("spokenPunctuation", "false"),
+            ("punctuation", "false"),
+            ("numSpeakers", "0"),
+            ("diarize", "false"),
+        ]
+        if hotwords:
+            for word in hotwords:
+                data_list.append(("hotwords[]", word))
+
+        async with self.semaphore:
+            response = await self.client.post(
+                self.settings.stt_url,
+                headers=headers,
+                data=data_list,
+                files=files,
+                timeout=self.timeout,
+            )
         response.raise_for_status()
-    except requests.HTTPError:
-        logger.error("Vira STT HTTP error %s: %s", response.status_code, response.text)
-        raise
-    payload = response.json()
-    data_section = payload.get("data", {}) or {}
-    nested_data = data_section.get("data", {}) or {}
-    ai_response = nested_data.get("aiResponse", {}) or {}
-    ai_result = ai_response.get("result", {}) or {}
+        payload = response.json()
+        data_section = payload.get("data", {}) or {}
+        nested_data = data_section.get("data", {}) or {}
+        ai_response = nested_data.get("aiResponse", {}) or {}
+        ai_result = ai_response.get("result", {}) or {}
 
-    text = (
-        data_section.get("text")
-        or nested_data.get("text")
-        or ai_result.get("text")
-        or ""
-    )
-    status = (
-        data_section.get("status")
-        or payload.get("status")
-        or ai_response.get("status")
-        or "unknown"
-    )
-    request_id = (
-        data_section.get("requestId")
-        or nested_data.get("requestId")
-        or ai_response.get("requestId")
-    )
-    trace_id = (
-        data_section.get("traceId")
-        or nested_data.get("traceId")
-        or ai_response.get("meta", {}).get("traceId")
-    )
+        text = (
+            data_section.get("text")
+            or nested_data.get("text")
+            or ai_result.get("text")
+            or ""
+        )
+        status = (
+            data_section.get("status")
+            or payload.get("status")
+            or ai_response.get("status")
+            or "unknown"
+        )
+        request_id = (
+            data_section.get("requestId")
+            or nested_data.get("requestId")
+            or ai_response.get("requestId")
+        )
+        trace_id = (
+            data_section.get("traceId")
+            or nested_data.get("traceId")
+            or ai_response.get("meta", {}).get("traceId")
+        )
 
-    if not text:
-        logger.warning("Vira STT returned empty text. status=%s payload=%s", status, payload)
+        if not text:
+            logger.warning("Vira STT returned empty text. status=%s payload=%s", status, payload)
 
-    return STTResult(status=status, text=text, request_id=request_id, trace_id=trace_id)
+        return STTResult(status=status, text=text, request_id=request_id, trace_id=trace_id)

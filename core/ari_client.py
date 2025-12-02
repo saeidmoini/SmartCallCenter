@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, Optional
 
-import requests
+import httpx
 
 from config.settings import AriSettings
 
@@ -11,90 +11,104 @@ logger = logging.getLogger(__name__)
 
 class AriClient:
     """
-    Thin wrapper around the Asterisk ARI HTTP endpoints.
+    Thin async wrapper around the Asterisk ARI HTTP endpoints.
     """
 
-    def __init__(self, settings: AriSettings):
+    def __init__(
+        self,
+        settings: AriSettings,
+        timeout: float = 10.0,
+        max_connections: int = 100,
+    ):
         self.base_url = settings.base_url.rstrip("/")
         self.app_name = settings.app_name
         self.auth = (settings.username, settings.password)
-        self.session = requests.Session()
-        self.session.auth = self.auth
-        self.session.headers.update({"Accept": "application/json"})
+        limits = httpx.Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=max_connections,
+        )
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url,
+            auth=self.auth,
+            headers={"Accept": "application/json"},
+            timeout=timeout,
+            limits=limits,
+        )
 
-    def _request(
+    async def close(self) -> None:
+        await self.client.aclose()
+
+    async def _request(
         self,
         method: str,
         path: str,
         params: Optional[Dict[str, Any]] = None,
         json: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        url = f"{self.base_url}{path}"
-        logger.debug("ARI %s %s params=%s json=%s", method, url, params, json)
-        response = self.session.request(
+        logger.debug("ARI %s %s params=%s json=%s", method, path, params, json)
+        response = await self.client.request(
             method=method,
-            url=url,
+            url=path,
             params=params,
             json=json,
-            timeout=10,
         )
         response.raise_for_status()
         if response.content:
             return response.json()
         return {}
 
-    def create_bridge(self, name: str, bridge_type: str = "mixing") -> Dict[str, Any]:
-        return self._request(
+    async def create_bridge(self, name: str, bridge_type: str = "mixing") -> Dict[str, Any]:
+        return await self._request(
             "POST",
             "/bridges",
             params={"type": bridge_type, "name": name},
         )
 
-    def delete_bridge(self, bridge_id: str) -> None:
-        self._request("DELETE", f"/bridges/{bridge_id}")
+    async def delete_bridge(self, bridge_id: str) -> None:
+        await self._request("DELETE", f"/bridges/{bridge_id}")
 
-    def add_channel_to_bridge(
+    async def add_channel_to_bridge(
         self, bridge_id: str, channel_id: str, role: Optional[str] = None
     ) -> None:
         params = {"channel": channel_id}
         if role:
             params["role"] = role
-        self._request("POST", f"/bridges/{bridge_id}/addChannel", params=params)
+        await self._request("POST", f"/bridges/{bridge_id}/addChannel", params=params)
 
-    def remove_channel_from_bridge(self, bridge_id: str, channel_id: str) -> None:
-        self._request(
+    async def remove_channel_from_bridge(self, bridge_id: str, channel_id: str) -> None:
+        await self._request(
             "POST", f"/bridges/{bridge_id}/removeChannel", params={"channel": channel_id}
         )
 
-    def answer_channel(self, channel_id: str) -> None:
-        self._request("POST", f"/channels/{channel_id}/answer")
+    async def answer_channel(self, channel_id: str) -> None:
+        await self._request("POST", f"/channels/{channel_id}/answer")
 
-    def hangup_channel(self, channel_id: str, reason: str = "normal") -> None:
-        self._request(
+    async def hangup_channel(self, channel_id: str, reason: str = "normal") -> None:
+        await self._request(
             "DELETE", f"/channels/{channel_id}", params={"reason": reason}
         )
 
-    def play_on_channel(
+    async def play_on_channel(
         self, channel_id: str, media: str, lang: Optional[str] = None
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {"media": media}
         if lang:
             params["lang"] = lang
-        return self._request(
+        return await self._request(
             "POST", f"/channels/{channel_id}/play", params=params
         )
 
-    def play_on_bridge(
+    async def play_on_bridge(
         self, bridge_id: str, media: str, lang: Optional[str] = None
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {"media": media}
         if lang:
             params["lang"] = lang
-        return self._request(
+        return await self._request(
             "POST", f"/bridges/{bridge_id}/play", params=params
         )
 
-    def originate_call(
+    async def originate_call(
         self,
         endpoint: str,
         app_args: str,
@@ -120,12 +134,12 @@ class AriClient:
             caller_id,
             timeout,
         )
-        return self._request("POST", "/channels", params=params)
+        return await self._request("POST", "/channels", params=params)
 
-    def stop_playback(self, playback_id: str) -> None:
-        self._request("DELETE", f"/playbacks/{playback_id}")
+    async def stop_playback(self, playback_id: str) -> None:
+        await self._request("DELETE", f"/playbacks/{playback_id}")
 
-    def record_channel(
+    async def record_channel(
         self,
         channel_id: str,
         name: str,
@@ -141,18 +155,17 @@ class AriClient:
             "ifExists": "overwrite",
             "beep": "false",
         }
-        return self._request(
+        return await self._request(
             "POST", f"/channels/{channel_id}/record", params=params
         )
 
-    def fetch_stored_recording(self, name: str) -> bytes:
-        url = f"{self.base_url}/recordings/stored/{name}/file"
+    async def fetch_stored_recording(self, name: str) -> bytes:
         logger.debug("Fetching stored recording %s", name)
-        response = self.session.get(url, timeout=15)
+        response = await self.client.get(f"/recordings/stored/{name}/file")
         response.raise_for_status()
-        return response.content
+        return await response.aread()
 
-    def record_bridge(
+    async def record_bridge(
         self,
         bridge_id: str,
         name: str,
@@ -168,4 +181,4 @@ class AriClient:
             "ifExists": "overwrite",
             "beep": "false",
         }
-        return self._request("POST", f"/bridges/{bridge_id}/record", params=params)
+        return await self._request("POST", f"/bridges/{bridge_id}/record", params=params)
