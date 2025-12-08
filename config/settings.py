@@ -154,10 +154,10 @@ def get_settings() -> Settings:
     )
 
     call_window_start = _parse_time(
-        os.getenv("CALL_WINDOW_START", "08:00"), default=time(8, 0)
+        os.getenv("CALL_WINDOW_START", "00:00"), default=time(0, 0)
     )
     call_window_end = _parse_time(
-        os.getenv("CALL_WINDOW_END", "20:00"), default=time(20, 0)
+        os.getenv("CALL_WINDOW_END", "23:59"), default=time(23, 59)
     )
 
     dialer = DialerSettings(
@@ -169,9 +169,7 @@ def get_settings() -> Settings:
         max_calls_per_day=int(os.getenv("MAX_CALLS_PER_DAY", "200")),
         call_window_start=call_window_start,
         call_window_end=call_window_end,
-        static_contacts=_parse_list(
-            os.getenv("STATIC_CONTACTS", "+989000000000")
-        ),
+        static_contacts=_parse_list(os.getenv("STATIC_CONTACTS", "")),
         batch_size=int(os.getenv("DIALER_BATCH_SIZE", os.getenv("MAX_CALLS_PER_MINUTE", "10"))),
         default_retry=int(os.getenv("DIALER_DEFAULT_RETRY", "60")),
     )
