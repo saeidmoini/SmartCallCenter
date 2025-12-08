@@ -122,13 +122,33 @@ class MarketingScenario(BaseScenario):
             await self._hangup(session)
 
     async def on_call_failed(self, session: Session, reason: str) -> None:
-        async with session.lock:
-            if session.result is None:
-                session.result = f"failed:{reason}"
+        # Customer leg failed/busy/unanswered => missed
+        result_value = "missed"
+        await self._set_result(session, result_value, force=True, report=True)
         logger.warning("Call failed session=%s reason=%s", session.session_id, reason)
         await self._hangup(session)
 
     async def on_call_hangup(self, session: Session) -> None:
+        operator_connected = False
+        yes_intent = False
+        no_intent = False
+        app_hangup = False
+        async with session.lock:
+            operator_connected = session.metadata.get("operator_connected") == "1"
+            yes_intent = session.metadata.get("intent_yes") == "1"
+            no_intent = session.metadata.get("intent_no") == "1"
+            app_hangup = session.metadata.get("app_hangup") == "1"
+        if operator_connected:
+            return
+        if session.result is None or session.result in {"user_didnt_answer", "missed"}:
+            if yes_intent:
+                await self._set_result(session, "disconnected", force=True, report=True)
+            elif no_intent:
+                await self._set_result(session, "not_interested", force=True, report=True)
+            elif not app_hangup:
+                await self._set_result(session, "hangup", force=True, report=True)
+            else:
+                await self._set_result(session, session.result or "failed:hangup", force=True, report=True)
         logger.debug("Call hangup signaled for session %s", session.session_id)
 
     async def on_call_finished(self, session: Session) -> None:
@@ -341,14 +361,24 @@ class MarketingScenario(BaseScenario):
         return "unknown"
 
     # Routing -------------------------------------------------------------
+    async def _set_result(self, session: Session, value: str, force: bool = False, report: bool = False) -> None:
+        updated = False
+        async with session.lock:
+            if force or session.result is None or session.result in {"user_didnt_answer", "missed"}:
+                session.result = value
+                updated = True
+        if updated and report:
+            await self._report_result(session)
+
     async def _handle_yes(self, session: Session) -> None:
         async with session.lock:
-            session.result = session.result or "connected_to_operator"
+            session.metadata["intent_yes"] = "1"
         await self._play_prompt(session, "yes")
 
     async def _handle_no(self, session: Session) -> None:
         async with session.lock:
-            session.result = "not_interested"
+            session.metadata["intent_no"] = "1"
+        await self._set_result(session, "not_interested", force=True, report=True)
         await self._play_prompt(session, "goodby")
 
     async def _handle_no_response(
@@ -365,8 +395,10 @@ class MarketingScenario(BaseScenario):
             reason,
             session.session_id,
         )
-        async with session.lock:
-            session.result = session.result or "user_didnt_answer"
+        if "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
+            await self._set_result(session, f"failed:{reason}", force=True, report=True)
+        else:
+            await self._set_result(session, "missed", force=False, report=True)
         await self._play_prompt(session, "goodby")
 
     async def _handle_number_question(self, session: Session) -> None:
@@ -443,6 +475,8 @@ class MarketingScenario(BaseScenario):
         channel_id = self._customer_channel_id(session)
         if not channel_id:
             return
+        async with session.lock:
+            session.metadata["app_hangup"] = "1"
         try:
             await self.ari_client.hangup_channel(channel_id)
         except Exception as exc:
@@ -491,10 +525,16 @@ class MarketingScenario(BaseScenario):
         elif result == "not_interested":
             status = "NOT_INTERESTED"
             reason = "User declined"
-        elif result == "user_didnt_answer":
+        elif result in {"missed", "user_didnt_answer"}:
             status = "MISSED"
-            reason = "No usable speech/intent"
-        elif result.startswith("failed:"):
+            reason = "No answer/busy/unreachable"
+        elif result == "hangup":
+            status = "HANGUP"
+            reason = "Caller hung up"
+        elif result == "disconnected":
+            status = "DISCONNECTED"
+            reason = "Caller said yes but disconnected before operator answered"
+        elif result.startswith("failed:") or result == "failed":
             status = "FAILED"
             reason = result
 
