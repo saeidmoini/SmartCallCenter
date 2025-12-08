@@ -57,9 +57,6 @@ class Dialer:
             while not stop_event.is_set() and self._running:
                 self._reset_daily_if_needed()
                 await self._maybe_refill_from_panel()
-                if not self._within_call_window():
-                    await asyncio.sleep(30)
-                    continue
                 if not await self._can_start_call():
                     await asyncio.sleep(1)
                     continue
@@ -88,13 +85,8 @@ class Dialer:
         logger.debug("Session %s completed; dialer notified", session_id)
 
     def _within_call_window(self) -> bool:
-        now = datetime.now().time()
-        start = self.settings.dialer.call_window_start
-        end = self.settings.dialer.call_window_end
-        if start <= now <= end:
-            return True
-        logger.debug("Outside call window (%s - %s)", start, end)
-        return False
+        # Panel already enforces schedule; always allow here.
+        return True
 
     def _reset_daily_if_needed(self) -> None:
         today = date.today()
