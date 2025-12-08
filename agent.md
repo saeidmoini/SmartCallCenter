@@ -23,7 +23,7 @@ This repository hosts an ARI-based call-control engine for outbound marketing ca
 - Keep code modular; avoid globals; prefer classes in the existing packages.
 - When adding scenarios, create a new module under `logic/` and wire it in `main.py` and `SessionManager` hooks. Preserve the existing marketing scenario unless the user replaces it.
 - Rate limiting is handled by `logic/dialer.py` (concurrency, per-minute, per-day, call windows). Adjust via env vars and document changes.
-- STT/TTS hooks use Vira endpoints; tokens are separate for STT and TTS (`VIRA_STT_TOKEN`, `VIRA_TTS_TOKEN`). `VIRA_TOKEN` is unused for STT.
+- STT/TTS hooks use Vira endpoints; tokens are separate for STT and TTS (`VIRA_STT_TOKEN`, `VIRA_TTS_TOKEN`). 
 - Recording/transcription fetches stored recordings via the async `AriClient`; transcription runs as async tasks behind Vira STT semaphore limits with hotwords seeded from scenario tokens (single words).
 - Logging uses the standard library. Keep logs informative for Stasis events, playbacks, originates, STT/LLM failures.
 - Audio sync is automatic at startup: mp3s under `assets/audio/src` are converted to wav (16k mono) and copied to the configured `AST_SOUND_DIR` for playback as `sound:custom/<name>`.

@@ -51,7 +51,6 @@ class GapGPTSettings:
 
 @dataclass
 class ViraSettings:
-    token: str
     stt_token: str
     tts_token: str
     stt_url: str
@@ -142,9 +141,8 @@ def get_settings() -> Settings:
     )
 
     vira = ViraSettings(
-        token=os.getenv("VIRA_TOKEN", ""),
-        stt_token=os.getenv("VIRA_STT_TOKEN", os.getenv("VIRA_TOKEN", "")),
-        tts_token=os.getenv("VIRA_TTS_TOKEN", os.getenv("VIRA_TOKEN", "")),
+        stt_token=os.getenv("VIRA_STT_TOKEN", ""),
+        tts_token=os.getenv("VIRA_TTS_TOKEN", ""),
         stt_url=os.getenv(
             "VIRA_STT_URL", "https://partai.gw.isahab.ir/avanegar/v2/avanegar/request"
         ),

@@ -49,7 +49,7 @@ class ViraTTSClient:
         speaker: str = "female",
         speed: float = 1.0,
     ) -> TTSResult:
-        token = self.settings.tts_token or self.settings.token
+        token = self.settings.tts_token
         if not token:
             logger.warning("Vira TTS token is missing; TTS call skipped.")
             return TTSResult(status="unauthorized")

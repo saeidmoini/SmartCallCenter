@@ -5,7 +5,7 @@ Outbound, ARI-driven call-control engine for a language academy marketing campai
 ## Features
 - Bridge-centric ARI control (Asterisk 20 / FreePBX 17).
 - Outbound dialer with limits: concurrent calls, per-minute, per-day, and call windows; can pull batches from external panel API.
-- Scenario logic for marketing outreach (hello prompt → yes/no → second prompt → yes/no → optional operator bridge for outbound only; inbound calls do not transfer).
+- Scenario logic for marketing outreach (hello → single capture classify yes/no/number-question; yes plays `yes` then optional operator bridge for outbound; no/unknown plays `goodby`; number-question plays `number` then a follow-up capture). Inbound calls skip operator transfer.
 - STT/TTS hooks via Vira with separate STT/TTS tokens; optional GapGPT fallback for intent classification.
 - In-memory session manager ready for future Redis-backed storage.
 - Async/await architecture (httpx + websockets) with semaphore-guarded STT/TTS/LLM calls and HTTP connection pooling.
@@ -17,7 +17,7 @@ Outbound, ARI-driven call-control engine for a language academy marketing campai
 3. Install deps: `pip install -r requirements.txt`
 4. Copy `.env.example` to `.env` and fill in ARI, trunk, and token details.
 5. Ensure ARI dialplan sends calls to `Stasis(salehi)` and ARI user is configured.
-6. Prompts live in-repo under `assets/audio/` (mp3 sources and 16 kHz mono wav). To install them on Asterisk run (with the right permissions) `bash scripts/sync_audio.sh` which copies wavs to `/var/lib/asterisk/sounds/custom/` as `hello`, `goodby`, `second` (override target with `AST_SOUND_DIR`).
+6. Prompts live in-repo under `assets/audio/` (mp3 sources and 16 kHz mono wav). To install them on Asterisk run (with the right permissions) `bash scripts/sync_audio.sh` which copies wavs to `/var/lib/asterisk/sounds/custom/` as `hello`, `goodby`, `yes`, `number` (override target with `AST_SOUND_DIR`).
 7. Run: `python main.py` (async entrypoint; startup auto-converts mp3→wav and syncs prompts to Asterisk).
 
 Note: Ensure `AST_SOUND_DIR` points to your actual Asterisk custom sounds path (e.g., `/var/lib/asterisk/sounds/custom` or `/var/lib/asterisk/sounds/en/custom`). The app will try to sync to both base and `en/custom` when possible. If permissions block copying, run as a user with rights or pre-create the directories.
@@ -29,7 +29,7 @@ Set via environment or `.env`:
 - Contacts: `STATIC_CONTACTS` (comma-separated; defaults to `+989000000000` until the external API is ready)
 - Panel: `PANEL_BASE_URL`, `PANEL_API_TOKEN`
 - LLM: `GAPGPT_BASE_URL`, `GAPGPT_API_KEY` (optional)
-- Vira: `VIRA_STT_TOKEN`, `VIRA_TTS_TOKEN`, `VIRA_STT_URL`, `VIRA_TTS_URL` (`VIRA_TOKEN` is unused for STT)
+- Vira: `VIRA_STT_TOKEN`, `VIRA_TTS_TOKEN`, `VIRA_STT_URL`, `VIRA_TTS_URL` 
 - Operator bridge: `OPERATOR_EXTENSION`, `OPERATOR_TRUNK`, `OPERATOR_CALLER_ID`, `OPERATOR_TIMEOUT`
 - Concurrency/timeouts: `HTTP_MAX_CONNECTIONS`, `HTTP_TIMEOUT`, `ARI_TIMEOUT`, `STT_TIMEOUT`, `TTS_TIMEOUT`, `LLM_TIMEOUT`, `MAX_PARALLEL_STT`, `MAX_PARALLEL_TTS`, `MAX_PARALLEL_LLM`
 - Logging: `LOG_LEVEL`

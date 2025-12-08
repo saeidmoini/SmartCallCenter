@@ -23,7 +23,7 @@ async def chat(messages, base_url, api_key, timeout=20.0):
 
 ## Vira STT usage
 - Endpoint: `POST {VIRA_STT_URL}`.
-- Auth: header `gateway-token: <VIRA_STT_TOKEN>` (or `VIRA_TOKEN` fallback).
+- Auth: header `gateway-token: <VIRA_STT_TOKEN>`
 - Payload: multipart form with `audio` (`audio.wav`, `audio/wav`) plus fields:
   - `model=default`, `srt=false`, `inverseNormalizer=false`, `timestamp=false`,
     `spokenPunctuation=false`, `punctuation=false`, `numSpeakers=0`, `diarize=false`,
@@ -59,7 +59,7 @@ async def transcribe(audio_bytes, stt_url, token, timeout=30.0):
 
 ## Vira TTS usage
 - Endpoint: `POST {VIRA_TTS_URL}`.
-- Auth: header `gateway-token: <VIRA_TTS_TOKEN>` (or `VIRA_TOKEN`).
+- Auth: header `gateway-token: <VIRA_TTS_TOKEN>` 
 - Payload JSON: `{"text": "...", "speaker": "female", "speed": 1.0, "timestamp": false}`.
 - Response: audio info in `data.url` / `data.filename`, status in `status`.
 - Client: `httpx.AsyncClient`; timeout ~30s; protect with `asyncio.Semaphore` (e.g., `MAX_PARALLEL_TTS=50`).
