@@ -538,6 +538,13 @@ class MarketingScenario(BaseScenario):
             status = "FAILED"
             reason = result
 
+        # Avoid duplicate reports with the same status to panel.
+        async with session.lock:
+            last_status = session.metadata.get("panel_last_status")
+            if last_status == status:
+                return
+            session.metadata["panel_last_status"] = status
+
         await self.panel_client.report_result(
             number_id=number_id,
             phone_number=phone_number,
