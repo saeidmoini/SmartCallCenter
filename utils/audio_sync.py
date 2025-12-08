@@ -40,8 +40,6 @@ def ensure_audio_assets(settings: AudioSettings) -> None:
 
 
 def _convert_mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
-    if wav_path.exists() and wav_path.stat().st_mtime >= mp3_path.stat().st_mtime:
-        return
     logger.info("Converting %s -> %s", mp3_path, wav_path)
     cmd = [
         "ffmpeg",
@@ -50,10 +48,10 @@ def _convert_mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
         str(mp3_path),
         "-ac",
         "1",
-        "-ar",
-        "16000",
         "-c:a",
         "pcm_s16le",
+        "-ar",
+        "8000",
         str(wav_path),
     ]
     try:
