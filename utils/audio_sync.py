@@ -28,6 +28,7 @@ def ensure_audio_assets(settings: AudioSettings) -> None:
         for mp3_path in src_dir.glob("*.mp3"):
             wav_path = wav_dir / f"{mp3_path.stem}.wav"
             _convert_mp3_to_wav(mp3_path, wav_path)
+            _convert_mp3_to_ulaw(mp3_path, wav_dir / f"{mp3_path.stem}.ulaw")
 
     try:
         _copy_wavs_to_asterisk(wav_dir, ast_dir)
@@ -60,26 +61,48 @@ def _convert_mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
         logger.warning("ffmpeg conversion failed for %s: %s", mp3_path, exc)
 
 
+def _convert_mp3_to_ulaw(mp3_path: Path, ulaw_path: Path) -> None:
+    logger.info("Converting %s -> %s", mp3_path, ulaw_path)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(mp3_path),
+        "-ac",
+        "1",
+        "-ar",
+        "8000",
+        "-f",
+        "mulaw",
+        str(ulaw_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as exc:
+        logger.warning("ffmpeg ulaw conversion failed for %s: %s", mp3_path, exc)
+
+
 def _copy_wavs_to_asterisk(wav_dir: Path, ast_dir: Path) -> None:
     targets = _build_target_dirs(ast_dir)
 
-    for wav_path in wav_dir.glob("*.wav"):
-        for target_dir in targets:
-            try:
-                target_dir.mkdir(parents=True, exist_ok=True)
-                target = target_dir / wav_path.name
-                shutil.copy2(wav_path, target)
-                os.chmod(target, 0o644)
-                logger.info("Synced prompt %s to %s", wav_path.name, target)
-            except PermissionError:
-                logger.warning(
-                    "Permission denied copying %s to %s. "
-                    "Run with sufficient privileges or adjust AST_SOUND_DIR.",
-                    wav_path,
-                    target_dir,
-                )
-            except Exception as exc:
-                logger.warning("Failed to copy %s to %s: %s", wav_path, target_dir, exc)
+    for pattern in ("*.wav", "*.ulaw"):
+        for wav_path in wav_dir.glob(pattern):
+            for target_dir in targets:
+                try:
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    target = target_dir / wav_path.name
+                    shutil.copy2(wav_path, target)
+                    os.chmod(target, 0o644)
+                    logger.info("Synced prompt %s to %s", wav_path.name, target)
+                except PermissionError:
+                    logger.warning(
+                        "Permission denied copying %s to %s. "
+                        "Run with sufficient privileges or adjust AST_SOUND_DIR.",
+                        wav_path,
+                        target_dir,
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to copy %s to %s: %s", wav_path, target_dir, exc)
 
 
 def _build_target_dirs(ast_dir: Path) -> set[Path]:
