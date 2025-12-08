@@ -108,6 +108,9 @@ class PanelClient:
         attempted_at: datetime,
         batch_id: Optional[str] = None,
     ) -> None:
+        if number_id is None and not phone_number:
+            logger.debug("Skipping panel report: missing number_id and phone_number payload=%s/%s", status, reason)
+            return
         payload = {
             "number_id": number_id,
             "phone_number": phone_number,
@@ -133,6 +136,9 @@ class PanelClient:
             queued = list(self.pending_reports)
             self.pending_reports.clear()
         for payload in queued:
+            if not payload.get("number_id") and not payload.get("phone_number"):
+                logger.debug("Dropping queued panel report without number/phone: %s", payload)
+                continue
             try:
                 resp = await self.client.post("/api/dialer/report-result", json=payload)
                 resp.raise_for_status()

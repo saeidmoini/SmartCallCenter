@@ -510,6 +510,9 @@ class MarketingScenario(BaseScenario):
             return
         number_id = session.metadata.get("number_id")
         phone_number = session.metadata.get("contact_number")
+        if number_id is None and not phone_number:
+            logger.debug("Skipping panel report for session %s: no number_id/phone_number", session.session_id)
+            return
         batch_id = session.metadata.get("batch_id")
         attempted_iso = session.metadata.get("attempted_at")
         from datetime import datetime, timezone
