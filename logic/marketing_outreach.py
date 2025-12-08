@@ -47,6 +47,7 @@ class MarketingScenario(BaseScenario):
             "hello": "sound:custom/hello",
             "goodby": "sound:custom/goodby",
             "yes": "sound:custom/yes",
+            "onhold": "sound:custom/onhold",
             "number": "sound:custom/number",
             "processing": "sound:beep",
         }
@@ -79,6 +80,8 @@ class MarketingScenario(BaseScenario):
         if leg.direction == LegDirection.OPERATOR:
             async with session.lock:
                 session.result = session.result or "connected_to_operator"
+                session.metadata["operator_connected"] = "1"
+            await self._stop_onhold_playbacks(session)
             logger.info("Operator leg answered for session %s", session.session_id)
             return
 
@@ -100,6 +103,7 @@ class MarketingScenario(BaseScenario):
                 on_no=self._handle_no,
             )
         elif prompt_key == "yes":
+            await self._play_onhold(session)
             await self._connect_to_operator(session)
         elif prompt_key == "number":
             await self._capture_response(
@@ -108,6 +112,12 @@ class MarketingScenario(BaseScenario):
                 on_yes=self._handle_yes,
                 on_no=self._handle_no,
             )
+        elif prompt_key == "onhold":
+            operator_connected = False
+            async with session.lock:
+                operator_connected = session.metadata.get("operator_connected") == "1"
+            if not operator_connected:
+                await self._play_onhold(session)
         elif prompt_key == "goodby":
             await self._hangup(session)
 
@@ -145,6 +155,19 @@ class MarketingScenario(BaseScenario):
                 session.playbacks[playback_id] = prompt_key
             await self.session_manager.register_playback(session.session_id, playback_id)
         logger.info("Playing prompt %s on channel %s", prompt_key, channel_id)
+
+    async def _play_onhold(self, session: Session) -> None:
+        # Start/loop hold music until operator answers.
+        await self._play_prompt(session, "onhold")
+
+    async def _stop_onhold_playbacks(self, session: Session) -> None:
+        async with session.lock:
+            hold_playbacks = [pb_id for pb_id, key in session.playbacks.items() if key == "onhold"]
+        for pb_id in hold_playbacks:
+            try:
+                await self.ari_client.stop_playback(pb_id)
+            except Exception as exc:
+                logger.debug("Failed to stop onhold playback %s: %s", pb_id, exc)
 
     def _customer_channel_id(self, session: Session) -> Optional[str]:
         if session.outbound_leg:

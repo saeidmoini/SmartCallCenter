@@ -3,7 +3,7 @@ set -euo pipefail
 
 SOURCE_DIR="$(cd "$(dirname "$0")/.." && pwd)/assets/audio/wav"
 TARGET_DIR="${AST_SOUND_DIR:-/var/lib/asterisk/sounds/custom}"
-PROMPTS=("hello" "goodby" "yes" "number")
+PROMPTS=("hello" "goodby" "yes" "number" "onhold")
 
 if [ ! -d "$SOURCE_DIR" ]; then
   echo "Source dir not found: $SOURCE_DIR" >&2
