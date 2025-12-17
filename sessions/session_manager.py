@@ -132,9 +132,13 @@ class SessionManager:
             endpoint = args[2] if len(args) >= 3 else "operator"
             session = await self.get_session(session_id)
             if not session:
-                session = Session(session_id=session_id)
-                async with self.lock:
-                    self.sessions[session_id] = session
+                # Customer leg is gone; immediately hang up this orphaned operator leg.
+                logger.info("Operator leg %s has no session %s; hanging up", channel_id, session_id)
+                try:
+                    await self.ari_client.hangup_channel(channel_id)
+                except Exception as exc:
+                    logger.debug("Failed to hangup orphan operator leg %s: %s", channel_id, exc)
+                return
             async with session.lock:
                 session.operator_leg = CallLeg(
                     channel_id=channel_id,

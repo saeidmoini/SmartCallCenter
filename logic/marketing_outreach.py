@@ -378,6 +378,10 @@ class MarketingScenario(BaseScenario):
             await self._report_result(session)
 
     async def _handle_yes(self, session: Session) -> None:
+        # If customer leg is already gone, skip operator flow.
+        if not self._customer_channel_id(session):
+            logger.debug("Skipping yes handling; customer channel missing for session %s", session.session_id)
+            return
         async with session.lock:
             session.metadata["intent_yes"] = "1"
         await self._play_prompt(session, "yes")
