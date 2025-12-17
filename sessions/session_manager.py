@@ -173,9 +173,12 @@ class SessionManager:
                 self.sessions[session_id] = session
             # Reject inbound if called number not in allowed list (our own numbers).
             divert_header = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(Diversion)")
+            to_header = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(To)")
             called_candidates = [called_num]
             if divert_header:
                 called_candidates.append(self._extract_number_from_header(divert_header))
+            if to_header:
+                called_candidates.append(self._extract_number_from_header(to_header))
             allowed = not self.allowed_inbound_numbers or any(
                 self._normalize_number(num) in self.allowed_inbound_numbers for num in called_candidates if num
             )
@@ -206,13 +209,16 @@ class SessionManager:
                 await self.scenario_handler.on_inbound_channel_created(session)
             divert = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(Diversion)")
             pai = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(P-Asserted-Identity)")
+            to_header = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(To)")
+            called_candidates.append(self._extract_number_from_header(to_header))
             logger.info(
-                "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s",
+                "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s to=%s",
                 channel_id,
                 session_id,
                 session.metadata.get("caller_number"),
                 divert,
                 pai,
+                to_header,
             )
             if divert or pai:
                 async with session.lock:
