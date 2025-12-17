@@ -171,31 +171,6 @@ class SessionManager:
                 divert_header = None
             async with self.lock:
                 self.sessions[session_id] = session
-            # Reject inbound if called number not in allowed list (our own numbers).
-            divert_header = await self._get_header(channel_id, "Diversion")
-            to_header = await self._get_header(channel_id, "To")
-            hist_header = await self._get_header(channel_id, "History-Info")
-            called_candidates = [called_num]
-            for hdr in (divert_header, to_header, hist_header):
-                parsed = self._extract_number_from_header(hdr)
-                if parsed:
-                    called_candidates.append(parsed)
-            allowed = not self.allowed_inbound_numbers or any(
-                self._normalize_number(num) in self.allowed_inbound_numbers for num in called_candidates if num
-            )
-            if not allowed:
-                logger.info(
-                    "Rejecting inbound channel %s not in allowed numbers; caller=%s called=%s divert=%s",
-                    channel_id,
-                    caller_num,
-                    called_num,
-                    divert_header,
-                )
-                try:
-                    await self.ari_client.hangup_channel(channel_id, reason="rejected")
-                except Exception:
-                    pass
-                return
             await self._index_channel(session_id, channel_id)
             await self._ensure_bridge(session)
             if session.bridge and channel_id:
@@ -262,6 +237,8 @@ class SessionManager:
     async def _handle_hangup(self, event: dict) -> None:
         channel = event.get("channel", {})
         channel_id = channel.get("id")
+        cause = event.get("cause")
+        cause_txt = event.get("cause_txt")
         session = await self._get_session_by_channel(channel_id)
         if not session:
             return
@@ -273,6 +250,14 @@ class SessionManager:
         if self.scenario_handler:
             await self.scenario_handler.on_call_hangup(session)
         await self._cleanup_session(session)
+        logger.info(
+            "Hangup event channel=%s cause=%s cause_txt=%s session=%s result=%s",
+            channel_id,
+            cause,
+            cause_txt,
+            session.session_id,
+            session.result,
+        )
 
     async def _handle_channel_destroyed(self, event: dict) -> None:
         channel = event.get("channel", {})
