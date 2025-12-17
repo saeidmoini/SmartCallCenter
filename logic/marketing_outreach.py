@@ -464,7 +464,9 @@ class MarketingScenario(BaseScenario):
         return self._handle_yes, self._handle_no
 
     def _is_inbound_only(self, session: Session) -> bool:
-        return session.inbound_leg is not None and session.outbound_leg is None
+        # Inbound calls should follow the same flow (including operator transfer)
+        # so never block operator connect for inbound-only sessions.
+        return False
 
     # Result reporting ----------------------------------------------------
     async def _report_result(self, session: Session) -> None:
