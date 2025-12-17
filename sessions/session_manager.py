@@ -30,6 +30,7 @@ class SessionManager:
         self.playback_to_session: Dict[str, str] = {}
         self.recording_to_session: Dict[str, str] = {}
         self.lock = asyncio.Lock()
+        # Inbound is allowed for all; we keep the set for future use but do not gate.
         self.allowed_inbound_numbers = {self._normalize_number(n) for n in (allowed_inbound_numbers or []) if n}
 
     async def create_outbound_session(
@@ -132,7 +133,7 @@ class SessionManager:
             endpoint = args[2] if len(args) >= 3 else "operator"
             session = await self.get_session(session_id)
             if not session:
-                # Customer leg is gone; immediately hang up this orphaned operator leg.
+                # Customer leg is already gone; tear down this orphan operator leg.
                 logger.info("Operator leg %s has no session %s; hanging up", channel_id, session_id)
                 try:
                     await self.ari_client.hangup_channel(channel_id)
@@ -187,17 +188,15 @@ class SessionManager:
             await self._maybe_mark_answered(session, session.inbound_leg, channel_state)
             if self.scenario_handler:
                 await self.scenario_handler.on_inbound_channel_created(session)
-            divert = await self._get_header(channel_id, "Diversion")
-            pai = await self._get_header(channel_id, "P-Asserted-Identity")
-            to_header = await self._get_header(channel_id, "To")
+            divert = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(Diversion)")
+            pai = await self.ari_client.get_channel_variable(channel_id, "SIP_HEADER(P-Asserted-Identity)")
             logger.info(
-                "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s to=%s",
+                "Inbound channel %s created session %s caller=%s diversion=%s p_asserted=%s",
                 channel_id,
                 session_id,
                 session.metadata.get("caller_number"),
                 divert,
                 pai,
-                to_header,
             )
             if divert or pai:
                 async with session.lock:
@@ -240,8 +239,6 @@ class SessionManager:
     async def _handle_hangup(self, event: dict) -> None:
         channel = event.get("channel", {})
         channel_id = channel.get("id")
-        cause = event.get("cause")
-        cause_txt = event.get("cause_txt")
         session = await self._get_session_by_channel(channel_id)
         if not session:
             return
@@ -253,14 +250,6 @@ class SessionManager:
         if self.scenario_handler:
             await self.scenario_handler.on_call_hangup(session)
         await self._cleanup_session(session)
-        logger.info(
-            "Hangup event channel=%s cause=%s cause_txt=%s session=%s result=%s",
-            channel_id,
-            cause,
-            cause_txt,
-            session.session_id,
-            session.result,
-        )
 
     async def _handle_channel_destroyed(self, event: dict) -> None:
         channel = event.get("channel", {})
@@ -369,13 +358,6 @@ class SessionManager:
             if leg and leg.channel_id == channel_id:
                 return leg
         return None
-
-    async def _get_header(self, channel_id: str, header: str) -> Optional[str]:
-        # Try PJSIP header first, fall back to generic SIP_HEADER
-        val = await self.ari_client.get_channel_variable(channel_id, f"PJSIP_HEADER({header})")
-        if val:
-            return val
-        return await self.ari_client.get_channel_variable(channel_id, f"SIP_HEADER({header})")
 
     @staticmethod
     def _normalize_number(number: Optional[str]) -> Optional[str]:
