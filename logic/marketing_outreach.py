@@ -175,7 +175,11 @@ class MarketingScenario(BaseScenario):
         if not channel_id:
             logger.warning("No customer channel available to play %s for session %s", prompt_key, session.session_id)
             return
-        playback = await self.ari_client.play_on_channel(channel_id, media)
+        try:
+            playback = await self.ari_client.play_on_channel(channel_id, media)
+        except Exception as exc:
+            logger.warning("Failed to play %s on %s for session %s: %s", prompt_key, channel_id, session.session_id, exc)
+            return
         playback_id = playback.get("id")
         if playback_id:
             async with session.lock:
@@ -490,7 +494,9 @@ class MarketingScenario(BaseScenario):
                 session.metadata.get("batch_id"),
                 session.metadata.get("attempted_at"),
             )
-        if self.panel_client:
+        inbound_only = session.inbound_leg is not None and session.outbound_leg is None
+        # Inbound calls do not report to panel
+        if self.panel_client and not inbound_only:
             await self._report_to_panel(session)
 
     async def _hangup(self, session: Session) -> None:
