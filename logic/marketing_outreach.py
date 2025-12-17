@@ -183,7 +183,10 @@ class MarketingScenario(BaseScenario):
 
     async def _play_onhold(self, session: Session) -> None:
         # Start/loop hold music until operator answers.
-        await self._play_prompt(session, "onhold")
+        try:
+            await self._play_prompt(session, "onhold")
+        except Exception as exc:
+            logger.debug("Onhold playback failed (ignored): %s", exc)
 
     async def _stop_onhold_playbacks(self, session: Session) -> None:
         async with session.lock:
@@ -224,15 +227,15 @@ class MarketingScenario(BaseScenario):
                 await self.ari_client.record_bridge(
                     bridge_id=session.bridge.bridge_id,
                     name=recording_name,
-                    max_duration=10,
-                    max_silence=2,
+                    max_duration=15,
+                    max_silence=5,
                 )
             else:
                 await self.ari_client.record_channel(
                     channel_id=channel_id,
                     name=recording_name,
-                    max_duration=10,
-                    max_silence=2,
+                    max_duration=15,
+                    max_silence=5,
                 )
             await self.session_manager.register_recording(session.session_id, recording_name)
         except Exception as exc:
