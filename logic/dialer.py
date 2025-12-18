@@ -315,7 +315,8 @@ class Dialer:
             if not session:
                 return
             async with session.lock:
-                if session.status == SessionStatus.COMPLETED:
+                # If the call is already active/answered or completed, do nothing.
+                if session.status in {SessionStatus.ACTIVE, SessionStatus.COMPLETED}:
                     return
                 if session.result:
                     return
