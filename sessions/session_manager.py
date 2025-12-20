@@ -239,6 +239,8 @@ class SessionManager:
     async def _handle_hangup(self, event: dict) -> None:
         channel = event.get("channel", {})
         channel_id = channel.get("id")
+        cause = channel.get("cause")
+        cause_txt = channel.get("cause_txt")
         session = await self._get_session_by_channel(channel_id)
         if not session:
             return
@@ -247,6 +249,12 @@ class SessionManager:
             if leg:
                 leg.state = LegState.HUNGUP
             session.status = SessionStatus.COMPLETED
+            if cause:
+                session.metadata["hangup_cause"] = str(cause)
+            if cause_txt:
+                session.metadata["hangup_cause_txt"] = cause_txt
+            if leg:
+                session.metadata["hungup_by"] = leg.direction.value
         if self.scenario_handler:
             await self.scenario_handler.on_call_hangup(session)
         await self._cleanup_session(session)

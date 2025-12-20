@@ -478,6 +478,9 @@ class MarketingScenario(BaseScenario):
         async with session.lock:
             if session.metadata.get("hungup") == "1":
                 return
+            # If we already have a result set (e.g., hangup), do not override to failed.
+            if session.result and session.result not in {"user_didnt_answer", "missed"}:
+                return
         logger.info(
             "No usable response detected (phase=%s reason=%s) session=%s",
             phase,
@@ -517,6 +520,9 @@ class MarketingScenario(BaseScenario):
         async with session.lock:
             session.metadata["operator_endpoint"] = endpoint
             caller_id = session.metadata.get("contact_number") or self.settings.operator.caller_id
+            if session.metadata.get("hungup") == "1":
+                logger.debug("Skip operator connect; session %s already hung up", session.session_id)
+                return
         logger.info("Connecting session %s to operator endpoint %s", session.session_id, endpoint)
         try:
             await self.ari_client.originate_call(
