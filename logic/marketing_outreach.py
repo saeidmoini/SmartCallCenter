@@ -477,12 +477,13 @@ class MarketingScenario(BaseScenario):
         app_args = f"operator,{session.session_id},{endpoint}"
         async with session.lock:
             session.metadata["operator_endpoint"] = endpoint
+            caller_id = session.metadata.get("contact_number") or self.settings.operator.caller_id
         logger.info("Connecting session %s to operator endpoint %s", session.session_id, endpoint)
         try:
             await self.ari_client.originate_call(
                 endpoint=endpoint,
                 app_args=app_args,
-                caller_id=self.settings.operator.caller_id,
+                caller_id=caller_id,
                 timeout=self.settings.operator.timeout,
             )
         except Exception as exc:
