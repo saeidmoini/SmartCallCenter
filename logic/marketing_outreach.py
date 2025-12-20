@@ -371,11 +371,6 @@ class MarketingScenario(BaseScenario):
         if any(phrase in text for phrase in number_question_phrases):
             return "number_question"
 
-        if any(token in text for token in yes_tokens):
-            return "yes"
-        if any(token in text for token in no_tokens):
-            return "no"
-
         if self.llm_client.api_key:
             # Provide intent examples to the LLM so it understands what we treat as yes/no.
             positive_examples = list(yes_tokens)[:30]  # keep prompt concise
