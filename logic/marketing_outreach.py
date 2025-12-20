@@ -436,6 +436,9 @@ class MarketingScenario(BaseScenario):
         on_no: Callable[[Session], Awaitable[None]],
         reason: str,
     ) -> None:
+        async with session.lock:
+            if session.metadata.get("hungup") == "1":
+                return
         logger.info(
             "No usable response detected (phase=%s reason=%s) session=%s",
             phase,
