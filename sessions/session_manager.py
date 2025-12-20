@@ -307,8 +307,8 @@ class SessionManager:
                 session.result,
                 cause,
                 cause_txt,
-                f\"{t_answer_to_hang:.3f}\" if t_answer_to_hang is not None else \"na\",
-                f\"{t_yes_to_hang:.3f}\" if t_yes_to_hang is not None else \"na\",
+                f"{t_answer_to_hang:.3f}" if t_answer_to_hang is not None else "na",
+                f"{t_yes_to_hang:.3f}" if t_yes_to_hang is not None else "na",
             )
         if self.scenario_handler:
             await self.scenario_handler.on_call_hangup(session)
