@@ -339,7 +339,6 @@ class MarketingScenario(BaseScenario):
         text = transcript.lower()
         # Persian/English positive cues
         yes_tokens = {
-            "yes", "sure", "ok", "yah", "yea", "yeah",
             "بله", "اوکی", "در خدمتم", "بفرمایید", "تضمین چیه", "کجا هستید", "قیمتش چنده",
             "سایت دارین", "نمونه تدریس", "آدرس کجاست", "ترمیکه", "اساتید کین",
             "طول دوره چقدره", "چه کتابی تدریس میشه", "من از پایه می‌خوام شروع کنم",
@@ -352,7 +351,6 @@ class MarketingScenario(BaseScenario):
             "سایت هم دارید", "نمونه فیلم آموزشی دارید",
         }
         no_tokens = {
-            "no", "not", "nope",
             "نه", "نیاز ندارم", "نمیخواهم", "ممنون", "دو ساعت دیگه زنگ بزن", "وقت ندارم",
             "میشه برام بفرستید", "خصوصی دارید", "شماره موپاک کنید", "دیگه بامن تماس نگیرید",
             "الان سرکارم", "خودم مدرسم", "شماره مو حذف کنید", "برای بچه ام می‌خوام",
@@ -379,10 +377,18 @@ class MarketingScenario(BaseScenario):
             return "no"
 
         if self.llm_client.api_key:
+            # Provide intent examples to the LLM so it understands what we treat as yes/no.
+            positive_examples = list(yes_tokens)[:30]  # keep prompt concise
+            negative_examples = list(no_tokens)[:20]
             prompt = (
-                "You are a fast classifier. Reply with only 'yes', 'no', or 'unknown'. "
-                "Decide the intent based on this short utterance: "
-                f"\"{transcript}\""
+                "You are a fast classifier for call-center intents. "
+                "Reply with only 'yes', 'no', or 'unknown'. "
+                "Treat these as YES intents (examples): "
+                f"{'; '.join(positive_examples)}. "
+                "Treat these as NO intents (examples): "
+                f"{'; '.join(negative_examples)}. "
+                "If the user asks where their number came from, that is unknown (handled elsewhere). "
+                f"User said: \"{transcript}\""
             )
             try:
                 result = await self.llm_client.chat(
