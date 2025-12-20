@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import subprocess
 import tempfile
 from pathlib import Path
+from datetime import datetime
+import os
 from typing import Optional
 
 import requests
@@ -158,7 +160,17 @@ class ViraSTTClient:
                 if result.returncode != 0:
                     logger.debug("ffmpeg enhance failed; using raw audio. stderr=%s", result.stderr.decode(errors="ignore"))
                     return audio_bytes
-                return outp.read_bytes()
+                enhanced = outp.read_bytes()
+                # Save a copy for audit/listening
+                try:
+                    outdir = Path("/var/spool/asterisk/recording/enhanced")
+                    outdir.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")
+                    outfile = outdir / f"enhanced-{ts}.wav"
+                    outfile.write_bytes(enhanced)
+                except Exception as exc:
+                    logger.debug("Failed to persist enhanced audio copy: %s", exc)
+                return enhanced
         except FileNotFoundError:
             logger.debug("ffmpeg not found; using raw audio")
         except Exception as exc:
