@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import uuid
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Dict, Optional
 
 from core.ari_client import AriClient
@@ -32,6 +34,21 @@ class SessionManager:
         self.lock = asyncio.Lock()
         # Inbound is allowed for all; we keep the set for future use but do not gate.
         self.allowed_inbound_numbers = {self._normalize_number(n) for n in (allowed_inbound_numbers or []) if n}
+        self.hangup_logger = logging.getLogger("sessions.hangups")
+        self._ensure_hangup_log_handler()
+
+    def _ensure_hangup_log_handler(self) -> None:
+        # Add a dedicated rolling log for hangup tracing if not already present.
+        for handler in self.hangup_logger.handlers:
+            if isinstance(handler, RotatingFileHandler) and getattr(handler, "baseFilename", "").endswith("hangups.log"):
+                return
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+        handler = RotatingFileHandler(log_dir / "hangups.log", maxBytes=2 * 1024 * 1024, backupCount=3)
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        handler.setFormatter(formatter)
+        self.hangup_logger.addHandler(handler)
+        # Keep propagate=True so it still hits the main app.log.
 
     async def create_outbound_session(
         self, contact_number: str, metadata: Optional[Dict[str, str]] = None
@@ -255,6 +272,16 @@ class SessionManager:
                 session.metadata["hangup_cause_txt"] = cause_txt
             if leg:
                 session.metadata["hungup_by"] = leg.direction.value
+        self.hangup_logger.info(
+            "Hangup session=%s contact=%s channel=%s leg=%s cause=%s cause_txt=%s result=%s",
+            session.session_id,
+            session.metadata.get("contact_number"),
+            channel_id,
+            leg.direction.value if leg else "unknown",
+            cause,
+            cause_txt,
+            session.result,
+        )
         if self.scenario_handler:
             await self.scenario_handler.on_call_hangup(session)
         await self._cleanup_session(session)
