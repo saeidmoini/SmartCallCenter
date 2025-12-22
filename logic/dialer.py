@@ -393,7 +393,8 @@ class Dialer:
                 available_slots += line_slots
             outbound_active_total += stats["active"]
 
-        # Global outbound cap (do not exceed, regardless of inbound).
-        remaining_outbound = self.settings.dialer.max_concurrent_outbound_calls - outbound_active_total
-        available_slots = min(available_slots, max(0, remaining_outbound))
+        # Optional global outbound cap: only apply if >0.
+        if self.settings.dialer.max_concurrent_outbound_calls > 0:
+            remaining_outbound = self.settings.dialer.max_concurrent_outbound_calls - outbound_active_total
+            available_slots = min(available_slots, max(0, remaining_outbound))
         return max(0, available_slots)

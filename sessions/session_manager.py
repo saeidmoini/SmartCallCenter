@@ -194,8 +194,8 @@ class SessionManager:
         else:
             # Inbound calls are keyed by their channel id for the session id.
             session_id = channel_id
-            # Enforce inbound concurrency limit if configured.
-            if self.max_inbound_calls is not None:
+            # Enforce inbound concurrency limit only if a positive limit is set.
+            if self.max_inbound_calls is not None and self.max_inbound_calls > 0:
                 active_inbound = await self.inbound_active_count()
                 if active_inbound >= self.max_inbound_calls:
                     logger.warning(
