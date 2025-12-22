@@ -59,6 +59,8 @@ class Dialer:
         self.daily_marker: date = date.today()
         self._running = False
         self.lock = asyncio.Lock()
+        self.last_originate_window_start: float = 0.0
+        self.originate_count_in_window: int = 0
         self.next_panel_poll: datetime = datetime.utcnow()
         self.timeout_tasks: dict[str, asyncio.Task] = {}
         self.paused_by_failures = False
@@ -86,8 +88,19 @@ class Dialer:
                 if not contact:
                     await asyncio.sleep(5)
                     continue
+                # Throttle to max 5 originates per second (global).
+                now = asyncio.get_event_loop().time()
+                if now - self.last_originate_window_start >= 1.0:
+                    self.last_originate_window_start = now
+                    self.originate_count_in_window = 0
+                if self.originate_count_in_window >= 5:
+                    # Sleep until the next second window.
+                    await asyncio.sleep(max(0, 1.0 - (now - self.last_originate_window_start)))
+                    self.last_originate_window_start = asyncio.get_event_loop().time()
+                    self.originate_count_in_window = 0
+                self.originate_count_in_window += 1
                 await self._originate(contact)
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.05)
         finally:
             self._running = False
             logger.info("Dialer stopped")
@@ -377,4 +390,11 @@ class Dialer:
             line_slots = min(remaining_concurrency, remaining_per_minute, remaining_daily)
             if line_slots > 0:
                 available_slots += line_slots
-        return max(0, available_slots)
+
+        # Subtract active inbound calls so we don't exceed shared channel capacity.
+        inbound_active = 0
+        try:
+            inbound_active = await self.session_manager.inbound_active_count()
+        except Exception:
+            inbound_active = 0
+        return max(0, available_slots - inbound_active)

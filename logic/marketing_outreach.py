@@ -599,9 +599,8 @@ class MarketingScenario(BaseScenario):
                 session.metadata.get("batch_id"),
                 session.metadata.get("attempted_at"),
             )
-        inbound_only = session.inbound_leg is not None and session.outbound_leg is None
-        # Inbound calls do not report to panel
-        if self.panel_client and not inbound_only:
+        # Report both outbound and inbound (inbound has no number_id; phone_number is used).
+        if self.panel_client:
             await self._report_to_panel(session)
 
     async def _hangup(self, session: Session) -> None:
@@ -653,8 +652,6 @@ class MarketingScenario(BaseScenario):
 
     async def _report_to_panel(self, session: Session) -> None:
         if not self.panel_client:
-            return
-        if session.inbound_leg and session.outbound_leg is None:
             return
         number_id = session.metadata.get("number_id")
         phone_number = session.metadata.get("contact_number")

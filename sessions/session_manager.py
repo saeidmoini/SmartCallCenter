@@ -407,6 +407,20 @@ class SessionManager:
         async with self.lock:
             return len(self.sessions)
 
+    async def inbound_active_count(self) -> int:
+        """
+        Count inbound sessions that are still ringing or active.
+        Used to share concurrency limits with outbound calls.
+        """
+        async with self.lock:
+            sessions = list(self.sessions.values())
+        active_states = {SessionStatus.RINGING, SessionStatus.ACTIVE}
+        return sum(
+            1
+            for s in sessions
+            if s.inbound_leg is not None and s.status in active_states
+        )
+
     def _detect_direction(self, args: list) -> LegDirection:
         if not args:
             return LegDirection.INBOUND
