@@ -25,7 +25,13 @@ class SessionManager:
     Manages sessions, bridges, and routing of ARI events into scenario logic.
     """
 
-    def __init__(self, ari_client: AriClient, scenario_handler, allowed_inbound_numbers: Optional[list[str]] = None):
+    def __init__(
+        self,
+        ari_client: AriClient,
+        scenario_handler,
+        allowed_inbound_numbers: Optional[list[str]] = None,
+        max_inbound_calls: Optional[int] = None,
+    ):
         self.ari_client = ari_client
         self.scenario_handler = scenario_handler
         self.sessions: Dict[str, Session] = {}
@@ -35,6 +41,7 @@ class SessionManager:
         self.lock = asyncio.Lock()
         # Inbound is allowed for all; we keep the set for future use but do not gate.
         self.allowed_inbound_numbers = {self._normalize_number(n) for n in (allowed_inbound_numbers or []) if n}
+        self.max_inbound_calls = max_inbound_calls
         self.hangup_logger = logging.getLogger("sessions.hangups")
         self.userdrop_logger = logging.getLogger("sessions.userdrop")
         self._ensure_hangup_log_handler()
@@ -187,6 +194,20 @@ class SessionManager:
         else:
             # Inbound calls are keyed by their channel id for the session id.
             session_id = channel_id
+            # Enforce inbound concurrency limit if configured.
+            if self.max_inbound_calls is not None:
+                active_inbound = await self.inbound_active_count()
+                if active_inbound >= self.max_inbound_calls:
+                    logger.warning(
+                        "Inbound concurrency limit reached (%s); rejecting channel %s",
+                        self.max_inbound_calls,
+                        channel_id,
+                    )
+                    try:
+                        await self.ari_client.hangup_channel(channel_id)
+                    except Exception:
+                        pass
+                    return
             session = Session(session_id=session_id)
             async with session.lock:
                 session.inbound_leg = CallLeg(

@@ -380,6 +380,7 @@ class Dialer:
 
     async def _available_capacity(self) -> int:
         available_slots = 0
+        outbound_active_total = 0
         for line, stats in self.line_stats.items():
             if not line:
                 continue
@@ -390,11 +391,9 @@ class Dialer:
             line_slots = min(remaining_concurrency, remaining_per_minute, remaining_daily)
             if line_slots > 0:
                 available_slots += line_slots
+            outbound_active_total += stats["active"]
 
-        # Subtract active inbound calls so we don't exceed shared channel capacity.
-        inbound_active = 0
-        try:
-            inbound_active = await self.session_manager.inbound_active_count()
-        except Exception:
-            inbound_active = 0
-        return max(0, available_slots - inbound_active)
+        # Global outbound cap (do not exceed, regardless of inbound).
+        remaining_outbound = self.settings.dialer.max_concurrent_outbound_calls - outbound_active_total
+        available_slots = min(available_slots, max(0, remaining_outbound))
+        return max(0, available_slots)

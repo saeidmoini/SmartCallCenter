@@ -80,6 +80,8 @@ class DialerSettings:
     default_caller_id: str
     origination_timeout: int
     max_concurrent_calls: int
+    max_concurrent_outbound_calls: int
+    max_concurrent_inbound_calls: int
     max_calls_per_minute: int
     max_calls_per_day: int
     call_window_start: time
@@ -176,6 +178,8 @@ def get_settings() -> Settings:
         default_caller_id=os.getenv("DEFAULT_CALLER_ID", "1000"),
         origination_timeout=int(os.getenv("ORIGINATION_TIMEOUT", "30")),
         max_concurrent_calls=int(os.getenv("MAX_CONCURRENT_CALLS", "2")),
+        max_concurrent_outbound_calls=int(os.getenv("MAX_CONCURRENT_OUTBOUND_CALLS", os.getenv("MAX_CONCURRENT_CALLS", "2"))),
+        max_concurrent_inbound_calls=int(os.getenv("MAX_CONCURRENT_INBOUND_CALLS", os.getenv("MAX_CONCURRENT_CALLS", "2"))),
         max_calls_per_minute=int(os.getenv("MAX_CALLS_PER_MINUTE", "10")),
         max_calls_per_day=int(os.getenv("MAX_CALLS_PER_DAY", "200")),
         call_window_start=call_window_start,
