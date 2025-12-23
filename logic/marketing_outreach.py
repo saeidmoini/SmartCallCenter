@@ -4,6 +4,9 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
+import io
+import wave
+import audioop
 
 from config.settings import Settings
 from core.ari_client import AriClient
@@ -348,6 +351,14 @@ class MarketingScenario(BaseScenario):
     ) -> None:
         try:
             audio_bytes = await self.ari_client.fetch_stored_recording(recording_name)
+            if self._is_empty_audio(audio_bytes):
+                logger.info(
+                    "Recording deemed empty/too short; marking hangup session=%s phase=%s",
+                    session.session_id,
+                    phase,
+                )
+                await self._set_result(session, "hangup", force=True, report=True)
+                return
             stt_result: STTResult = await self.stt_client.transcribe_audio(
                 audio_bytes, hotwords=self.stt_hotwords
             )
@@ -394,6 +405,10 @@ class MarketingScenario(BaseScenario):
                         session.metadata.get("batch_id"),
                         session.metadata.get("attempted_at"),
                     )
+            # If Vira says empty audio, treat as user hangup.
+            if "Empty Audio file" in msg or "Input file content is unexpected" in msg:
+                await self._set_result(session, "hangup", force=True, report=True)
+                return
             await self._handle_no_response(session, phase, on_yes, on_no, reason="stt_failure")
             await self._handle_no_response(session, phase, on_yes, on_no, reason="stt_failure")
 
@@ -721,3 +736,24 @@ class MarketingScenario(BaseScenario):
             attempted_at=attempted_at,
             batch_id=batch_id,
         )
+
+    def _is_empty_audio(self, audio_bytes: bytes) -> bool:
+        """
+        Heuristic: treat as empty if duration <0.4s or normalized RMS < 0.001.
+        Falls back to byte-length check if parsing fails.
+        """
+        if not audio_bytes or len(audio_bytes) < 800:
+            return True
+        try:
+            with wave.open(io.BytesIO(audio_bytes), "rb") as w:
+                frames = w.getnframes()
+                rate = w.getframerate()
+                sampwidth = w.getsampwidth() or 2
+                data = w.readframes(frames)
+            duration = frames / rate if rate else 0
+            rms = audioop.rms(data, sampwidth) if frames else 0
+            max_amp = 2 ** (8 * sampwidth - 1)
+            norm = rms / max_amp if max_amp else 0
+            return duration < 0.4 or norm < 0.001
+        except Exception:
+            return False
