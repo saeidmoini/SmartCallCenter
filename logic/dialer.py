@@ -190,10 +190,20 @@ class Dialer:
         batch_id: Optional[str],
         attempted_at_iso: Optional[str],
     ) -> None:
-        if number_id is not None and result and result.startswith("failed"):
+        is_failure = bool(result and result.startswith("failed"))
+        if is_failure:
             self.failure_streak += 1
         else:
             self.failure_streak = 0
+
+        # Immediate hard-stop for recording failures.
+        if result == "failed:recording_failed" and not self.paused_by_failures:
+            self.failure_streak = max(self.failure_streak, self.settings.sms.fail_alert_threshold)
+            await self._handle_failure_threshold(
+                session_id, result, number_id, phone_number, batch_id, attempted_at_iso
+            )
+            return
+
         if (
             self.failure_streak >= self.settings.sms.fail_alert_threshold
             and not self.paused_by_failures

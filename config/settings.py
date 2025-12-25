@@ -230,7 +230,7 @@ def get_settings() -> Settings:
         api_key=os.getenv("SMS_API_KEY", ""),
         sender=os.getenv("SMS_FROM", ""),
         admins=_parse_list(os.getenv("SMS_ADMINS", "")),
-        fail_alert_threshold=int(os.getenv("FAIL_ALERT_THRESHOLD", "5")),
+        fail_alert_threshold=int(os.getenv("FAIL_ALERT_THRESHOLD", "3")),
     )
 
     log_level = os.getenv("LOG_LEVEL", "INFO")
