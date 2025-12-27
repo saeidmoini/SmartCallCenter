@@ -29,6 +29,7 @@ def ensure_audio_assets(settings: AudioSettings) -> None:
             wav_path = wav_dir / f"{mp3_path.stem}.wav"
             _convert_mp3_to_wav(mp3_path, wav_path)
             _convert_mp3_to_ulaw(mp3_path, wav_dir / f"{mp3_path.stem}.ulaw")
+            _convert_mp3_to_alaw(mp3_path, wav_dir / f"{mp3_path.stem}.alaw")
 
     try:
         _copy_wavs_to_asterisk(wav_dir, ast_dir)
@@ -82,10 +83,31 @@ def _convert_mp3_to_ulaw(mp3_path: Path, ulaw_path: Path) -> None:
         logger.warning("ffmpeg ulaw conversion failed for %s: %s", mp3_path, exc)
 
 
+def _convert_mp3_to_alaw(mp3_path: Path, alaw_path: Path) -> None:
+    logger.info("Converting %s -> %s", mp3_path, alaw_path)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(mp3_path),
+        "-ac",
+        "1",
+        "-ar",
+        "8000",
+        "-f",
+        "alaw",
+        str(alaw_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as exc:
+        logger.warning("ffmpeg alaw conversion failed for %s: %s", mp3_path, exc)
+
+
 def _copy_wavs_to_asterisk(wav_dir: Path, ast_dir: Path) -> None:
     targets = _build_target_dirs(ast_dir)
 
-    for pattern in ("*.wav", "*.ulaw"):
+    for pattern in ("*.wav", "*.ulaw", "*.alaw"):
         for wav_path in wav_dir.glob(pattern):
             for target_dir in targets:
                 try:
