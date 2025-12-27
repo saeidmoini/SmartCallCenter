@@ -49,8 +49,8 @@ class MarketingScenario(BaseScenario):
         self.dialer = None
         # Audio prompts expected on Asterisk as converted prompts (wav/slin) under sounds/custom
         self.prompt_media = {
-            "hello": "sound:custom/hello",
-            "goodby": "sound:custom/goodby",
+            "hello": "sound:hello-world",
+            "goodby": "sound:vm-goodbye",
             "yes": "sound:custom/yes",
             "onhold": "sound:custom/onhold",
             "number": "sound:custom/number",

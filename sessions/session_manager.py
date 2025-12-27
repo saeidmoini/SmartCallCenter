@@ -528,14 +528,11 @@ class SessionManager:
 
     async def _get_header(self, channel_id: str, name: str) -> Optional[str]:
         """
-        Try PJSIP then SIP header functions; suppress errors if not available.
+        Read a SIP header using the PJSIP header function; suppress errors if not available.
         """
-        header = await self.ari_client.get_channel_variable(
+        return await self.ari_client.get_channel_variable(
             channel_id, f"PJSIP_HEADER(read,{name})"
         )
-        if header:
-            return header
-        return await self.ari_client.get_channel_variable(channel_id, f"SIP_HEADER({name})")
 
     async def _remove_from_waiting(self, session_id: str) -> Optional[str]:
         async with self.lock:
