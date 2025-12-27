@@ -277,7 +277,7 @@ class Dialer:
             await self.ari_client.originate_call(
                 endpoint=endpoint,
                 app_args=app_args,
-                caller_id=self.settings.dialer.default_caller_id,
+                caller_id=self._caller_id_for_line(line),
                 timeout=self.settings.dialer.origination_timeout,
             )
             self._schedule_timeout_watch(session.session_id)
@@ -304,9 +304,18 @@ class Dialer:
     def _build_endpoint(self, contact: ContactItem, line: str) -> str:
         trunk = self.settings.dialer.outbound_trunk
         customer_digits = self._normalize_number(contact.phone_number) or contact.phone_number
-        suffix = line[-4:] if len(line) >= 4 else line
-        dial_str = f"{suffix}{customer_digits}"
+        dial_str = customer_digits
         return f"PJSIP/{dial_str}@{trunk}"
+
+    def _caller_id_for_line(self, line: str) -> str:
+        """
+        Caller ID = line number digits without leading zeros; fallback to default if empty.
+        """
+        digits = self._normalize_number(line) or ""
+        digits = digits.lstrip("0")
+        if digits:
+            return digits
+        return self.settings.dialer.default_caller_id
 
     def _normalize_number(self, number: Optional[str]) -> Optional[str]:
         if not number:
