@@ -31,6 +31,12 @@ def ensure_audio_assets(settings: AudioSettings) -> None:
             _convert_mp3_to_ulaw(mp3_path, wav_dir / f"{mp3_path.stem}.ulaw")
             _convert_mp3_to_alaw(mp3_path, wav_dir / f"{mp3_path.stem}.alaw")
 
+    # Clean stale formats (slin/gsm) so Asterisk picks the fresh ulaw/alaw/wav.
+    try:
+        _cleanup_legacy_formats(wav_dir, ast_dir)
+    except Exception as exc:
+        logger.debug("Cleanup of legacy audio formats failed: %s", exc)
+
     try:
         _copy_wavs_to_asterisk(wav_dir, ast_dir)
     except PermissionError:
@@ -125,6 +131,22 @@ def _copy_wavs_to_asterisk(wav_dir: Path, ast_dir: Path) -> None:
                     )
                 except Exception as exc:
                     logger.warning("Failed to copy %s to %s: %s", wav_path, target_dir, exc)
+
+
+def _cleanup_legacy_formats(wav_dir: Path, ast_dir: Path) -> None:
+    stems = {p.stem for p in wav_dir.glob("*.wav")}
+    targets = _build_target_dirs(ast_dir)
+    legacy_exts = (".slin", ".gsm")
+    for target_dir in targets:
+        for stem in stems:
+            for ext in legacy_exts:
+                legacy = target_dir / f"{stem}{ext}"
+                if legacy.exists():
+                    try:
+                        legacy.unlink()
+                        logger.info("Removed legacy prompt %s", legacy)
+                    except Exception as exc:
+                        logger.debug("Failed to remove legacy prompt %s: %s", legacy, exc)
 
 
 def _build_target_dirs(ast_dir: Path) -> set[Path]:
