@@ -586,7 +586,9 @@ class MarketingScenario(BaseScenario):
             reason,
             session.session_id,
         )
-        if "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
+        if "intent_unknown" in reason or reason == "unknown":
+            await self._set_result(session, "not_interested", force=True, report=True)
+        elif "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
             await self._set_result(session, f"failed:{reason}", force=True, report=True)
         else:
             await self._set_result(session, "missed", force=False, report=True)
@@ -670,6 +672,10 @@ class MarketingScenario(BaseScenario):
                 "responses": list(session.responses),
                 "session_id": session.session_id,
             }
+            last_reported = session.metadata.get("last_reported_result")
+            if last_reported == session.result:
+                return
+            session.metadata["last_reported_result"] = session.result
         logger.info("Report payload (stub): %s", payload)
         if self.dialer:
             await self.dialer.on_result(
@@ -693,7 +699,11 @@ class MarketingScenario(BaseScenario):
         try:
             await self.ari_client.hangup_channel(channel_id)
         except Exception as exc:
-            logger.warning("Hangup failed for session %s: %s", session.session_id, exc)
+            msg = ("Hangup failed for session %s: %s", session.session_id, exc)
+            if "404" in str(exc):
+                logger.debug(*msg)
+            else:
+                logger.warning(*msg)
 
     def _build_negative_logger(self) -> logging.Logger:
         neg_logger = logging.getLogger("logic.negatives")
@@ -768,6 +778,9 @@ class MarketingScenario(BaseScenario):
         elif result == "disconnected":
             status = "DISCONNECTED"
             reason = "Caller said yes but disconnected before operator answered"
+        elif result == "unknown":
+            status = "NOT_INTERESTED"
+            reason = "Unknown intent"
         elif result.startswith("failed:") or result == "failed":
             status = "FAILED"
             reason = result

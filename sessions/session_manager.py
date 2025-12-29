@@ -422,12 +422,16 @@ class SessionManager:
             try:
                 await self.ari_client.delete_bridge(session.bridge.bridge_id)
             except Exception as exc:
-                logger.warning(
+                msg = (
                     "Failed to delete bridge %s for session %s: %s",
                     session.bridge.bridge_id,
                     session.session_id,
                     exc,
                 )
+                if "404" in str(exc):
+                    logger.debug(*msg)
+                else:
+                    logger.warning(*msg)
         if self.dialer:
             try:
                 await self.dialer.on_session_completed(session.session_id)
