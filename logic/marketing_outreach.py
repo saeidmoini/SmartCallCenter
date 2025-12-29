@@ -136,6 +136,31 @@ class MarketingScenario(BaseScenario):
                 return mobile
         return None
 
+    async def _reserve_outbound_line(self) -> Optional[str]:
+        """Reuse dialer line selection and counters for operator/mobile legs."""
+        if not self.dialer:
+            return None
+        line = self.dialer._available_line()  # reuse dialer logic
+        if not line:
+            return None
+        async with self.dialer.lock:
+            stats = self.dialer.line_stats.get(line)
+            if stats is None:
+                return None
+            stats["active"] += 1
+            stats["attempts"].append(datetime.utcnow())
+            stats["daily"] += 1
+        self.dialer._record_attempt()
+        return line
+
+    async def _release_outbound_line(self, line: Optional[str]) -> None:
+        if not line or not self.dialer:
+            return
+        async with self.dialer.lock:
+            stats = self.dialer.line_stats.get(line)
+            if stats:
+                stats["active"] = max(stats.get("active", 0) - 1, 0)
+
     async def on_outbound_channel_created(self, session: Session) -> None:
         logger.debug("Outbound channel ready for session %s", session.session_id)
 
@@ -244,6 +269,9 @@ class MarketingScenario(BaseScenario):
             operator_mobile = session.metadata.get("operator_mobile")
         if operator_mobile:
             self.agent_busy.discard(operator_mobile)
+        line_used = session.metadata.get("operator_outbound_line")
+        if line_used:
+            await self._release_outbound_line(line_used)
         logger.info("Call finished session=%s result=%s", session.session_id, result)
         await self._report_result(session)
         if self.dialer:
@@ -639,12 +667,17 @@ class MarketingScenario(BaseScenario):
         # Choose operator endpoint: mobiles (round-robin) if provided, else static endpoint/extension.
         endpoint = ""
         operator_mobile = None
+        outbound_line = None
         if self.agent_mobiles:
             operator_mobile = self._next_available_agent()
             if not operator_mobile:
                 logger.warning("No available operator mobiles to connect session %s", session.session_id)
                 return
-            endpoint = f"PJSIP/{operator_mobile}@{self.settings.operator.trunk}"
+            outbound_line = await self._reserve_outbound_line()
+            if not outbound_line:
+                logger.warning("No available outbound line to reach operator mobile for session %s", session.session_id)
+                return
+            endpoint = f"PJSIP/{operator_mobile}@{self.settings.dialer.outbound_trunk}"
         else:
             endpoint = (
                 self.settings.operator.endpoint
@@ -655,7 +688,10 @@ class MarketingScenario(BaseScenario):
             session.metadata["operator_endpoint"] = endpoint
             if operator_mobile:
                 session.metadata["operator_mobile"] = operator_mobile
-            caller_id = session.metadata.get("contact_number") or self.settings.operator.caller_id
+                session.metadata["operator_outbound_line"] = outbound_line
+            caller_id = session.metadata.get("contact_number") or (
+                self.dialer._caller_id_for_line(outbound_line) if (operator_mobile and outbound_line and self.dialer) else self.settings.operator.caller_id
+            )
             if session.metadata.get("hungup") == "1":
                 logger.debug("Skip operator connect; session %s already hung up", session.session_id)
                 return
@@ -672,7 +708,12 @@ class MarketingScenario(BaseScenario):
         except Exception as exc:
             async with session.lock:
                 session.result = "failed:operator_failed"
+                # Release line reservation on failure
+                if outbound_line:
+                    session.metadata.pop("operator_outbound_line", None)
             logger.exception("Operator originate failed for session %s: %s", session.session_id, exc)
+            if outbound_line:
+                await self._release_outbound_line(outbound_line)
             await self._play_prompt(session, "goodby")
 
     async def _play_processing(self, session: Session) -> None:
