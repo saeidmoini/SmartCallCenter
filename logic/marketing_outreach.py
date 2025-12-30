@@ -651,13 +651,6 @@ class MarketingScenario(BaseScenario):
             session.session_id,
         )
         if "intent_unknown" in reason or reason == "unknown":
-            unknown_key = f"unknown_{phase}_count"
-            async with session.lock:
-                count = int(session.metadata.get(unknown_key, "0") or "0")
-                session.metadata[unknown_key] = str(count + 1)
-            if count == 0:
-                await self._play_prompt(session, "repeat")
-                return
             await self._set_result(session, "not_interested", force=True, report=True)
             await self._play_prompt(session, "goodby")
             return
