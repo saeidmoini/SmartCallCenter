@@ -354,14 +354,14 @@ class MarketingScenario(BaseScenario):
                     bridge_id=session.bridge.bridge_id,
                     name=recording_name,
                     max_duration=10,
-                    max_silence=1,
+                    max_silence=2,
                 )
             else:
                 await self.ari_client.record_channel(
                     channel_id=channel_id,
                     name=recording_name,
                     max_duration=10,
-                    max_silence=1,
+                    max_silence=2,
                 )
             await self.session_manager.register_recording(session.session_id, recording_name)
         except Exception as exc:
