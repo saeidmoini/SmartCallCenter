@@ -646,7 +646,11 @@ class MarketingScenario(BaseScenario):
             session.session_id,
         )
         if "intent_unknown" in reason or reason == "unknown":
-            await self._set_result(session, "not_interested", force=True, report=True)
+            await self._set_result(session, "unknown", force=True, report=True)
+            await self._play_prompt(session, "goodby")
+            return
+        if reason == "empty_transcript":
+            await self._set_result(session, "hangup", force=True, report=True)
             await self._play_prompt(session, "goodby")
             return
         if "stt_failure" in reason or "recording_failed" in reason or "error" in reason or reason.startswith("failed"):
@@ -917,7 +921,7 @@ class MarketingScenario(BaseScenario):
             status = "DISCONNECTED"
             reason = "Caller said yes but disconnected before operator answered"
         elif result == "unknown":
-            status = "NOT_INTERESTED"
+            status = "UNKNOWN"
             reason = "Unknown intent"
         elif result.startswith("failed:stt_failure"):
             status = "HANGUP"
