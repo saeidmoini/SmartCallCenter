@@ -219,6 +219,13 @@ class MarketingScenario(BaseScenario):
                 operator_connected = session.metadata.get("operator_connected") == "1"
             if not operator_connected:
                 await self._play_onhold(session)
+        elif prompt_key == "repeat":
+            # After repeating the question, capture the response again.
+            phase = "interest"
+            async with session.lock:
+                phase = session.metadata.get("recording_phase") or "interest"
+            on_yes, on_no = self._callbacks_for_phase(phase)
+            await self._capture_response(session, phase=phase, on_yes=on_yes, on_no=on_no)
         elif prompt_key == "goodby":
             await self._hangup(session)
 
@@ -650,7 +657,6 @@ class MarketingScenario(BaseScenario):
                 session.metadata[unknown_key] = str(count + 1)
             if count == 0:
                 await self._play_prompt(session, "repeat")
-                await self._capture_response(session, phase=phase, on_yes=on_yes, on_no=on_no)
                 return
             await self._set_result(session, "not_interested", force=True, report=True)
             await self._play_prompt(session, "goodby")
