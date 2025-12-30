@@ -235,6 +235,7 @@ class MarketingScenario(BaseScenario):
         no_intent = False
         app_hangup = False
         operator_call_started = False
+        cause = None
         async with session.lock:
             session.metadata["hungup"] = "1"
             operator_connected = session.metadata.get("operator_connected") == "1"
@@ -242,6 +243,7 @@ class MarketingScenario(BaseScenario):
             no_intent = session.metadata.get("intent_no") == "1"
             app_hangup = session.metadata.get("app_hangup") == "1"
             operator_call_started = session.metadata.get("operator_call_started") == "1"
+            cause = session.metadata.get("hangup_cause")
         if operator_connected:
             return
         # If customer hung up while we were still trying to reach an operator, immediately stop that leg.
@@ -255,6 +257,22 @@ class MarketingScenario(BaseScenario):
                 session.metadata.pop("operator_outbound_line", None)
                 session.metadata.pop("operator_endpoint", None)
             await self._set_result(session, "disconnected", force=True, report=True)
+            await self._stop_onhold_playbacks(session)
+            return
+        # If user said no and hung up during goodbye, mark as hangup (not interested already recorded).
+        if no_intent and session.result == "not_interested":
+            await self._set_result(session, "hangup", force=True, report=True)
+        # Map cause codes to finer statuses when nothing else is set.
+        cause_result = None
+        if cause:
+            if cause in {"17"}:
+                cause_result = "busy"
+            elif cause in {"21"}:
+                cause_result = "banned"
+            elif cause in {"18", "19", "20"}:
+                cause_result = "power_off"
+        if cause_result and (session.result is None or session.result in {"user_didnt_answer", "missed", "hangup", "disconnected"}):
+            await self._set_result(session, cause_result, force=True, report=True)
             await self._stop_onhold_playbacks(session)
             return
         if session.result is None or session.result in {"user_didnt_answer", "missed"}:
@@ -929,6 +947,15 @@ class MarketingScenario(BaseScenario):
         elif result.startswith("failed:") or result == "failed":
             status = "FAILED"
             reason = result
+        elif result == "busy":
+            status = "BUSY"
+            reason = "Line busy or rejected"
+        elif result == "power_off":
+            status = "POWER_OFF"
+            reason = "Unavailable / powered off / no response"
+        elif result == "banned":
+            status = "BANNED"
+            reason = "Rejected by operator"
 
         # Avoid duplicate reports with the same status to panel.
         async with session.lock:
