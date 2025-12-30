@@ -60,6 +60,8 @@ class MarketingScenario(BaseScenario):
             "onhold": "sound:custom/onhold",
             "number": "sound:custom/number",
             "processing": "sound:beep",
+            "alo": "sound:custom/alo",
+            "repeat": "sound:custom/repeat",
         }
         # Hotwords to bias STT toward common intents (single words, no phrases).
         self.stt_hotwords = [
@@ -482,33 +484,27 @@ class MarketingScenario(BaseScenario):
             "طول دوره چقدره", "چه کتابی تدریس میشه", "من از پایه می‌خوام شروع کنم",
             "هزینه اش چقدره", "زیر نظر چه سازمانی هستید", "مدرک میدید", "از چه سطحی شروع میشه",
             "مدرک معتبره", "من می‌خوام مهاجرت کنم", "حالا شما یه توضیح بدید",
-            "وصل کنید", "دوره ایلتس", "دوره مکالمه", "دوره دکترا",
-            "ترکی", "فرانسه", "آلمانی", "روسی",
-            "چینی", "کره ای", "عربی", "کجا برگزار میشه", "آموزشگاه کجاس", "چند وقته هست",
+            "وصل کنید",
+            "کجا برگزار میشه", "آموزشگاه کجاس", "چند وقته هست",
             "چطوری برگزار میشه", "تو چه اپلیکیشنی هست", "آنلاینه", "افلاینه", "اسم آموزشگاهتون",
             "سایت هم دارید", "نمونه فیلم آموزشی دارید",
             "می شه سایتتون رو برا من بفرستید ببینم لطفا",
-            "عربی به چه لهجه ای",
-            "برای دوره های زبان انگلیسی به چه شکله بله",
             "ممنونم از بله",
-            "دوره های آلمان تون به چه صورت هست",
             "کلاس حضوری ندارید",
             "فرمودید سایت آموزشی",
             "آدرستون کجاست",
             "آموزشگاه کجاست", "میشه برام بفرستید",
             "آدرس دارید یا فقط غیرحضوریه",
             "می‌خواهد لینک/اطلاعات را بعدا ببیند (درخواست ارسال لینک/اطلاع)",
-            "می‌پرسد درباره دوره‌های آلمانی یا فرانسه/زبان‌ها",
             "سوال می‌پرسد آموزشگاه کجاست یا کدام آموزشگاه هستید",
             "درخواست راهنمایی یا توضیح بیشتر درباره دوره",
             "سوال محل برگزاری برای حضور (کجا هستید برای حضور)",
             "تماس برگشتی برای اطلاع از کلاس‌ها بعد از میس‌کال",
         }
         no_tokens = {
-            "نه", "نیاز ندارم", "نمیخواهم", "ممنون", "دو ساعت دیگه زنگ بزن", "وقت ندارم",
-            "خصوصی دارید", "شماره موپاک کنید", "دیگه بامن تماس نگیرید",
-            "الان سرکارم", "خودم مدرسم", "شماره مو حذف کنید", "برای بچه ام می‌خوام",
-            "برای کسی دیگه می‌خوام", "بفرستید کسی دیگه خواست شماره تون رو میدم",
+            "نه", "نیاز ندارم", "نمیخواهم", "ممنون", "وقت ندارم",
+            "شماره موپاک کنید", "دیگه بامن تماس نگیرید",
+            "خودم مدرسم", "شماره مو حذف کنید", 
         }
         # Fast-path: if transcript already contains a clear yes token, skip LLM.
         for token in ("بله", "آره"):
@@ -527,7 +523,7 @@ class MarketingScenario(BaseScenario):
             ]
             prompt = (
                 "Classify intent into one word: yes / no / number_question / unknown.\n"
-                "YES = interest or any question about price/place/time/links/who/where/how, any language mentioned, requests for info.\n"
+                "YES = interest or any question about price/place/time/links/who/where/how, requests for info.\n"
                 "Examples YES: " + "; ".join(positive_examples) + ".\n"
                 "NO = reject/decline/not interested. Examples NO: " + "; ".join(negative_examples) + ".\n"
                 "NUMBER_QUESTION = asks where we got their number. Examples: " + "; ".join(number_q_examples) + ".\n"
