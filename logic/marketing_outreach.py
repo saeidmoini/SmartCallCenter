@@ -50,6 +50,7 @@ class MarketingScenario(BaseScenario):
         self.dialer = None
         # Agent mobiles (optional): round-robin, skip busy
         self.agent_mobiles = [m for m in settings.operator.mobile_numbers if m]
+        self.agent_ids: dict[str, Optional[int]] = {m: None for m in self.agent_mobiles}
         self.agent_busy: set[str] = set()
         self.agent_cursor = 0
         # Audio prompts expected on Asterisk as converted prompts (wav/slin) under sounds/custom
@@ -106,6 +107,29 @@ class MarketingScenario(BaseScenario):
 
     def attach_dialer(self, dialer) -> None:
         self.dialer = dialer
+
+    async def set_panel_agents(self, agents: list) -> None:
+        """Replace operator mobiles with panel-provided active_agents."""
+        mobiles: list[str] = []
+        ids: dict[str, Optional[int]] = {}
+        for agent in agents:
+            phone = None
+            agent_id = None
+            if isinstance(agent, dict):
+                phone = agent.get("phone_number")
+                agent_id = agent.get("id")
+            else:
+                phone = getattr(agent, "phone_number", None)
+                agent_id = getattr(agent, "id", None)
+            if phone:
+                mobiles.append(phone)
+                ids[phone] = agent_id
+        if not mobiles:
+            return
+        self.agent_mobiles = mobiles
+        self.agent_ids = ids
+        self.agent_busy.clear()
+        self.agent_cursor = 0
 
     def _next_available_agent(self) -> Optional[str]:
         if not self.agent_mobiles:
@@ -723,6 +747,7 @@ class MarketingScenario(BaseScenario):
             if operator_mobile:
                 session.metadata["operator_mobile"] = operator_mobile
                 session.metadata["operator_outbound_line"] = outbound_line
+                session.metadata["operator_agent_id"] = self.agent_ids.get(operator_mobile)
             if operator_mobile and outbound_line and self.dialer:
                 caller_id = self.dialer._caller_id_for_line(outbound_line)
             else:
@@ -784,6 +809,7 @@ class MarketingScenario(BaseScenario):
             session.metadata["operator_outbound_line"] = outbound_line
             session.metadata["operator_endpoint"] = endpoint
             session.metadata["operator_tried"] = ",".join(tried | {next_mobile})
+            session.metadata["operator_agent_id"] = self.agent_ids.get(next_mobile)
         logger.info("Retrying operator for session %s via %s (reason=%s)", session.session_id, endpoint, reason)
         try:
             await self.ari_client.originate_call(
@@ -921,6 +947,10 @@ class MarketingScenario(BaseScenario):
         result = session.result or "unknown"
         status = "FAILED"
         reason = result
+        # include latest transcript for selected statuses
+        user_message = None
+        if session.responses:
+            user_message = session.responses[-1].get("text")
         if result == "connected_to_operator":
             status = "CONNECTED"
             reason = "User said yes and connected to operator"
@@ -969,6 +999,9 @@ class MarketingScenario(BaseScenario):
             reason=reason,
             attempted_at=attempted_at,
             batch_id=batch_id,
+            agent_id=session.metadata.get("operator_agent_id"),
+            agent_phone=session.metadata.get("operator_mobile"),
+            user_message=user_message if status in {"UNKNOWN", "DISCONNECTED", "CONNECTED", "NOT_INTERESTED"} else None,
         )
 
     def _is_empty_audio(self, audio_bytes: bytes) -> bool:
