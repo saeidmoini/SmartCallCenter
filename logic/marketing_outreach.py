@@ -536,7 +536,7 @@ class MarketingScenario(BaseScenario):
             prompt = (
                 "Classify intent into one word: yes / no / number_question / unknown.\n"
                 "YES = interest or any question about price/place/time/links/who/where/how, requests for info or anything.\n"
-                "If the user names a course/level (e.g., دوره پنجم, سطح پنجم), treat it as YES (they want a course).\n"
+                "If the user names a course/level, treat it as YES (they want a course).\n"
                 "Examples YES: " + "; ".join(positive_examples) + ".\n"
                 "NO = reject/decline/not interested. Examples NO: " + "; ".join(negative_examples) + ".\n"
                 "NUMBER_QUESTION = asks where we got their number. Examples: " + "; ".join(number_q_examples) + ".\n"
