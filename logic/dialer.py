@@ -73,6 +73,8 @@ class Dialer:
         self.session_line: dict[str, str] = {}
         self.inbound_session_line: dict[str, str] = {}
         self.waiting_inbound: dict[str, int] = {}
+        # When an operator leg is being placed, pause queue origination until it obtains a line.
+        self.operator_priority_requests: int = 0
 
     async def run(self, stop_event: asyncio.Event) -> None:
         if self._running:
@@ -85,6 +87,9 @@ class Dialer:
                 await self._maybe_refill_from_panel()
                 if self.paused_by_failures:
                     await asyncio.sleep(2)
+                    continue
+                if self.operator_priority_requests > 0:
+                    await asyncio.sleep(0.05)
                     continue
                 if not await self._can_start_call():
                     await asyncio.sleep(1)
