@@ -121,22 +121,33 @@ class MarketingScenario(BaseScenario):
         return None
 
     async def _reserve_outbound_line(self) -> Optional[str]:
-        """Reuse dialer line selection and counters for operator/mobile legs."""
+        """
+        Reuse dialer line selection and counters for operator/mobile legs.
+        While we look for a free line, pause queue-originations to prioritize the operator leg.
+        """
         if not self.dialer:
             return None
-        line = self.dialer._available_line()  # reuse dialer logic
-        if not line:
+        # Signal the dialer loop to pause queue-originations while we try to grab a line.
+        self.dialer.operator_priority_requests += 1
+        try:
+            deadline = time.monotonic() + max(self.settings.operator.timeout, 5)
+            while time.monotonic() < deadline:
+                line = self.dialer._available_line()  # reuse dialer logic
+                if line:
+                    async with self.dialer.lock:
+                        stats = self.dialer.line_stats.get(line)
+                        if stats is None:
+                            return None
+                        stats["active"] += 1
+                        stats["attempts"].append(datetime.utcnow())
+                        stats["daily"] += 1
+                        stats["last_originated_ts"] = time.monotonic()
+                    self.dialer._record_attempt()
+                    return line
+                await asyncio.sleep(0.05)
             return None
-        async with self.dialer.lock:
-            stats = self.dialer.line_stats.get(line)
-            if stats is None:
-                return None
-            stats["active"] += 1
-            stats["attempts"].append(datetime.utcnow())
-            stats["daily"] += 1
-            stats["last_originated_ts"] = time.monotonic()
-        self.dialer._record_attempt()
-        return line
+        finally:
+            self.dialer.operator_priority_requests = max(0, self.dialer.operator_priority_requests - 1)
 
     async def _release_outbound_line(self, line: Optional[str]) -> None:
         if not line or not self.dialer:
