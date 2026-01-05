@@ -53,6 +53,8 @@ class MarketingScenario(BaseScenario):
         self.agent_ids: dict[str, Optional[int]] = {m: None for m in self.agent_mobiles}
         self.agent_busy: set[str] = set()
         self.agent_cursor = 0
+        # DTMF wait tasks per session (salehi simplified scenario)
+        self.dtmf_wait_tasks: dict[str, asyncio.Task] = {}
         # Audio prompts expected on Asterisk as converted prompts (wav/slin) under sounds/custom
         self.prompt_media = {
             "hello": "sound:custom/hello",
@@ -230,12 +232,7 @@ class MarketingScenario(BaseScenario):
         logger.debug("Playback %s finished for session %s (%s)", playback_id, session.session_id, prompt_key)
 
         if prompt_key == "hello":
-            await self._capture_response(
-                session,
-                phase="interest",
-                on_yes=self._handle_yes,
-                on_no=self._handle_no,
-            )
+            await self._start_dtmf_flow(session)
         elif prompt_key == "yes":
             # Skip operator transfer: mark disconnected and hang up without playing goodbye.
             await self._set_result(session, "disconnected", force=True, report=True)
@@ -716,6 +713,51 @@ class MarketingScenario(BaseScenario):
         await self._play_prompt(session, "number")
 
     # Operator bridge -----------------------------------------------------
+    async def _start_dtmf_flow(self, session: Session) -> None:
+        """
+        Simplified Salehi scenario: after hello, wait up to 10s for DTMF '1'.
+        """
+        async with session.lock:
+            if session.metadata.get("hungup") == "1":
+                return
+            session.metadata["dtmf_mode"] = "press1"
+            session.metadata["dtmf_done"] = "0"
+        # schedule timeout
+        task = asyncio.create_task(self._dtmf_timeout(session.session_id, 10))
+        self.dtmf_wait_tasks[session.session_id] = task
+
+    async def _dtmf_timeout(self, session_id: str, wait_seconds: int) -> None:
+        try:
+            await asyncio.sleep(wait_seconds)
+            session = await self.session_manager.get_session(session_id)
+            if not session:
+                return
+            async with session.lock:
+                if session.metadata.get("dtmf_done") == "1" or session.metadata.get("hungup") == "1":
+                    return
+                session.metadata["dtmf_done"] = "1"
+            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._hangup(session)
+        finally:
+            self.dtmf_wait_tasks.pop(session_id, None)
+
+    async def on_dtmf(self, session: Session, digit: str) -> None:
+        async with session.lock:
+            mode = session.metadata.get("dtmf_mode")
+            done = session.metadata.get("dtmf_done") == "1"
+            if mode != "press1" or done:
+                return
+            session.metadata["dtmf_done"] = "1"
+        # cancel timeout task
+        task = self.dtmf_wait_tasks.pop(session.session_id, None)
+        if task:
+            task.cancel()
+        if digit == "1":
+            await self._set_result(session, "connected", force=True, report=True)
+        else:
+            await self._set_result(session, "disconnected", force=True, report=True)
+        await self._hangup(session)
+
     async def _connect_to_operator(self, session: Session) -> None:
         async with session.lock:
             if session.metadata.get("hungup") == "1":
