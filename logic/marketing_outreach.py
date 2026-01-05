@@ -736,7 +736,7 @@ class MarketingScenario(BaseScenario):
                 if session.metadata.get("dtmf_done") == "1" or session.metadata.get("hungup") == "1":
                     return
                 session.metadata["dtmf_done"] = "1"
-            await self._set_result(session, "disconnected", force=True, report=True)
+            await self._set_result(session, "hangup", force=True, report=True)
             await self._hangup(session)
         finally:
             self.dtmf_wait_tasks.pop(session_id, None)
