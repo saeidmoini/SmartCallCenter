@@ -43,7 +43,6 @@ def ensure_audio_assets(settings: AudioSettings) -> None:
 
 def _convert_mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
     logger.info("Converting %s -> %s", mp3_path, wav_path)
-    _prepare_ffmpeg_target(wav_path)
     cmd = [
         "ffmpeg",
         "-y",
@@ -57,12 +56,14 @@ def _convert_mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
         "8000",
         str(wav_path),
     ]
-    _run_ffmpeg(cmd, "wav", mp3_path)
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as exc:
+        logger.warning("ffmpeg conversion failed for %s: %s", mp3_path, exc)
 
 
 def _convert_mp3_to_ulaw(mp3_path: Path, ulaw_path: Path) -> None:
     logger.info("Converting %s -> %s", mp3_path, ulaw_path)
-    _prepare_ffmpeg_target(ulaw_path)
     cmd = [
         "ffmpeg",
         "-y",
@@ -76,12 +77,14 @@ def _convert_mp3_to_ulaw(mp3_path: Path, ulaw_path: Path) -> None:
         "mulaw",
         str(ulaw_path),
     ]
-    _run_ffmpeg(cmd, "ulaw", mp3_path)
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as exc:
+        logger.warning("ffmpeg ulaw conversion failed for %s: %s", mp3_path, exc)
 
 
 def _convert_mp3_to_alaw(mp3_path: Path, alaw_path: Path) -> None:
     logger.info("Converting %s -> %s", mp3_path, alaw_path)
-    _prepare_ffmpeg_target(alaw_path)
     cmd = [
         "ffmpeg",
         "-y",
@@ -95,49 +98,10 @@ def _convert_mp3_to_alaw(mp3_path: Path, alaw_path: Path) -> None:
         "alaw",
         str(alaw_path),
     ]
-    _run_ffmpeg(cmd, "alaw", mp3_path)
-
-
-def _prepare_ffmpeg_target(target: Path) -> bool:
-    """
-    Make the ffmpeg output path writable by the running user.
-    This helps avoid "Permission denied" when existing files were created by
-    another user (e.g., root).
-    """
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            target.parent.chmod(0o775)
-        except Exception:
-            pass
-        if target.exists():
-            try:
-                # Remove stale file created by a different user.
-                target.unlink()
-            except PermissionError:
-                # Last resort: try to relax permissions then unlink.
-                try:
-                    target.chmod(0o664)
-                    target.unlink()
-                except Exception:
-                    logger.warning(
-                        "Permission denied preparing %s for ffmpeg output; continuing anyway",
-                        target,
-                    )
-        return True
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as exc:
-        logger.warning("Failed to prepare %s for ffmpeg output; continuing anyway: %s", target, exc)
-        return False
-
-
-def _run_ffmpeg(cmd: list[str], label: str, mp3_path: Path) -> None:
-    try:
-        result = subprocess.run(cmd, capture_output=True)
-        if result.returncode != 0:
-            stderr = result.stderr.decode(errors="ignore").strip()
-            logger.warning("ffmpeg %s conversion failed for %s: %s", label, mp3_path, stderr)
-    except Exception as exc:
-        logger.warning("ffmpeg %s conversion failed for %s: %s", label, mp3_path, exc)
+        logger.warning("ffmpeg alaw conversion failed for %s: %s", mp3_path, exc)
 
 
 def _copy_wavs_to_asterisk(wav_dir: Path, ast_dir: Path) -> None:

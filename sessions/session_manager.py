@@ -111,8 +111,6 @@ class SessionManager:
             await self._handle_hangup(event)
         elif event_type == "ChannelDestroyed":
             await self._handle_channel_destroyed(event)
-        elif event_type == "ChannelDtmfReceived":
-            await self._handle_dtmf(event)
         elif event_type == "PlaybackStarted":
             await self._handle_playback_started(event)
         elif event_type == "PlaybackFinished":
@@ -350,18 +348,6 @@ class SessionManager:
                 leg.state = LegState.HUNGUP
             session.status = SessionStatus.COMPLETED
         await self._cleanup_session(session)
-
-    async def _handle_dtmf(self, event: dict) -> None:
-        channel = event.get("channel", {})
-        channel_id = channel.get("id")
-        digit = event.get("digit")
-        session = await self._get_session_by_channel(channel_id)
-        if not session or not self.scenario_handler or not digit:
-            return
-        try:
-            await self.scenario_handler.on_dtmf(session, digit)
-        except Exception as exc:
-            logger.exception("Error handling DTMF for session %s: %s", session.session_id, exc)
 
     async def _handle_playback_finished(self, event: dict) -> None:
         playback = event.get("playback", {})
