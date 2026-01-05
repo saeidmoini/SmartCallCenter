@@ -15,6 +15,24 @@ SERVICE_NAME="${BRANCH}.service"
 git fetch --all --prune
 git reset --hard "origin/${BRANCH}"
 
+# Ensure asterisk user can write audio outputs and sounds dirs (run after pull so new files are covered)
+if id asterisk >/dev/null 2>&1; then
+  CHOWN_BIN="chown"
+  CHMOD_BIN="chmod"
+  if command -v sudo >/dev/null 2>&1; then
+    CHOWN_BIN="sudo chown"
+    CHMOD_BIN="sudo chmod"
+  fi
+
+  ${CHOWN_BIN} -R asterisk:asterisk "${APP_DIR}/assets/audio" || true
+  ${CHMOD_BIN} -R 775 "${APP_DIR}/assets/audio" || true
+
+  for path in /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom /var/lib/asterisk/sounds/custom /var/lib/asterisk/sounds/en/custom; do
+    ${CHOWN_BIN} -R asterisk:asterisk "$path" || true
+    ${CHMOD_BIN} -R 775 "$path" || true
+  done
+fi
+
 python3 -m venv "${APP_DIR}/venv" || true
 source "${APP_DIR}/venv/bin/activate"
 pip install --upgrade pip
