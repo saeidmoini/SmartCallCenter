@@ -10,6 +10,12 @@ SERVICE_NAME="salehi.service"
 echo "[salehi] Updating source in ${APP_DIR}"
 cd "${APP_DIR}"
 
+# Ensure asterisk user can write audio outputs and sounds dirs (optional if already set)
+if id asterisk >/dev/null 2>&1; then
+  sudo chown -R asterisk:asterisk "${APP_DIR}/assets/audio" || true
+  sudo chown -R asterisk:asterisk /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
+fi
+
 # Track current branch to pull the matching remote branch (per-env configs)
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
 git fetch --all --prune
