@@ -284,6 +284,15 @@ class SessionManager:
             await self.scenario_handler.on_call_answered(session, leg)
         elif channel_state in {"Busy", "Failed"} and self.scenario_handler:
             await self.scenario_handler.on_call_failed(session, reason=channel_state)
+        # Detect early busy/congestion signals on progress (183) so we don't wait for timeout.
+        # PJSIP sends 'Progress' with cause headers in some cases (e.g., Reason: Q.850;cause=17).
+        elif channel_state == "Progress":
+            # Capture cause/cause_txt if present on the event or channel payload.
+            cause = event.get("cause") or channel.get("cause")
+            cause_txt = event.get("cause_txt") or channel.get("cause_txt")
+            if cause in {"17", "34", "41", "42"} or (cause_txt and any(x in cause_txt for x in ["busy", "Busy", "Congested"])):
+                if self.scenario_handler:
+                    await self.scenario_handler.on_call_failed(session, reason=cause_txt or str(cause))
 
     async def _handle_hangup(self, event: dict) -> None:
         channel = event.get("channel", {})
