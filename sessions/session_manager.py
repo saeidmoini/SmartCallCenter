@@ -108,6 +108,8 @@ class SessionManager:
         elif event_type == "ChannelStateChange":
             await self._handle_channel_state_change(event)
         elif event_type == "ChannelHangupRequest":
+            if not (event.get("channel") or {}).get("id") in self.channel_to_session:
+                logger.debug("HangupRequest before session map: %s", event)
             await self._handle_hangup(event)
         elif event_type == "ChannelDestroyed":
             await self._handle_channel_destroyed(event)
@@ -121,6 +123,9 @@ class SessionManager:
             await self._handle_recording_failed(event)
         elif event_type == "StasisEnd":
             await self._handle_stasis_end(event)
+        elif event_type == "Dial":
+            # Visibility into pre-Stasis dial failures (cause/dialstatus may appear here).
+            logger.debug("Dial event: %s", event)
         else:
             logger.debug("Unhandled event type: %s", event_type)
 
