@@ -17,11 +17,15 @@ if id asterisk >/dev/null 2>&1; then
     sudo chmod -R 775 "${APP_DIR}/assets/audio" || true
     sudo chown -R asterisk:asterisk /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
     sudo chmod -R 775 /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
+    sudo chown -R asterisk:asterisk /var/lib/asterisk/sounds/custom /var/lib/asterisk/sounds/en/custom || true
+    sudo chmod -R 775 /var/lib/asterisk/sounds/custom /var/lib/asterisk/sounds/en/custom || true
   else
     chown -R asterisk:asterisk "${APP_DIR}/assets/audio" || true
     chmod -R 775 "${APP_DIR}/assets/audio" || true
     chown -R asterisk:asterisk /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
     chmod -R 775 /usr/share/asterisk/sounds/custom /usr/share/asterisk/sounds/en/custom || true
+    chown -R asterisk:asterisk /var/lib/asterisk/sounds/custom /var/lib/asterisk/sounds/en/custom || true
+    chmod -R 775 /var/lib/asterisk/sounds/custom /var/lib/asterisk/sounds/en/custom || true
   fi
 fi
 
