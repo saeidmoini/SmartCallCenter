@@ -611,6 +611,8 @@ class MarketingScenario(BaseScenario):
         Detect GapGPT quota errors (e.g., pre_consume_token_quota_failed).
         """
         if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+            if exc.response.status_code == 403:
+                return True
             try:
                 data = exc.response.json()
                 err = data.get("error", {})
@@ -621,7 +623,11 @@ class MarketingScenario(BaseScenario):
             except Exception:
                 pass
         msg = str(exc).lower()
-        return "pre_consume_token_quota_failed" in msg or "token quota is not enough" in msg
+        return (
+            "pre_consume_token_quota_failed" in msg
+            or "token quota is not enough" in msg
+            or "403" in msg
+        )
 
     async def _handle_llm_quota_error(self, session: Session, exc: Exception) -> None:
         """
@@ -629,16 +635,25 @@ class MarketingScenario(BaseScenario):
         """
         async with session.lock:
             session.metadata["panel_last_status"] = "FAILED"
-        if not self.dialer:
-            return
-        await self.dialer.on_result(
-            session.session_id,
-            "failed:llm_quota",
-            session.metadata.get("number_id"),
-            session.metadata.get("contact_number"),
-            session.metadata.get("batch_id"),
-            session.metadata.get("attempted_at"),
-        )
+        await self._set_result(session, "failed:llm_quota", force=True, report=True)
+        number_id = session.metadata.get("number_id")
+        phone = session.metadata.get("contact_number")
+        batch_id = session.metadata.get("batch_id")
+        attempted_at = session.metadata.get("attempted_at")
+        if self.dialer:
+            # Force immediate pause/alert like Vira balance exhaustion.
+            threshold = self.dialer.settings.sms.fail_alert_threshold
+            self.dialer.failure_streak = max(self.dialer.failure_streak, threshold)
+            await self.dialer.on_result(
+                session.session_id,
+                "failed:llm_quota",
+                number_id,
+                phone,
+                batch_id,
+                attempted_at,
+            )
+        await self._hangup(session)
+        await self.session_manager._cleanup_session(session)
 
     # Routing -------------------------------------------------------------
     async def _set_result(self, session: Session, value: str, force: bool = False, report: bool = False) -> None:
