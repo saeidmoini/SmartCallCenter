@@ -673,6 +673,11 @@ class MarketingScenario(BaseScenario):
             session.metadata["yes_at"] = str(time.time())
         # Salehi branch: do not connect to operator. Just acknowledge and end the call.
         await self._play_prompt(session, "yes")
+        # Give the prompt a moment to play before tearing down the call.
+        try:
+            await asyncio.sleep(2)
+        except Exception:
+            pass
         await self._set_result(session, "disconnected", force=True, report=True)
         channel_id = self._customer_channel_id(session)
         if channel_id:
