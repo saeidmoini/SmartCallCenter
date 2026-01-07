@@ -7,7 +7,6 @@ set -euo pipefail
 #        SCENARIO=agrad ./update.sh
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVICE_NAME="salehi.service"
 
 # Detect scenario from environment or .env file
 SCENARIO="${SCENARIO:-}"
@@ -15,6 +14,9 @@ if [ -z "$SCENARIO" ] && [ -f "${APP_DIR}/.env" ]; then
   SCENARIO="$(grep -E '^SCENARIO=' "${APP_DIR}/.env" | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "")"
 fi
 SCENARIO="${SCENARIO:-salehi}"
+
+# Service name matches the scenario
+SERVICE_NAME="${SCENARIO}.service"
 
 echo "[CallCenter] Updating ${SCENARIO} scenario in ${APP_DIR}"
 cd "${APP_DIR}"
