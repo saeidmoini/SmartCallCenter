@@ -19,8 +19,8 @@ SCENARIO="${SCENARIO:-salehi}"
 echo "[CallCenter] Updating ${SCENARIO} scenario in ${APP_DIR}"
 cd "${APP_DIR}"
 
-# Use salehi branch (single codebase now supports both scenarios)
-BRANCH="salehi"
+# Use main branch (single codebase now supports both scenarios)
+BRANCH="main"
 echo "[CallCenter] Pulling from branch: ${BRANCH}"
 git fetch --all --prune
 git reset --hard "origin/${BRANCH}"
