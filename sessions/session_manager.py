@@ -39,6 +39,8 @@ class SessionManager:
         self.channel_to_session: Dict[str, str] = {}
         self.playback_to_session: Dict[str, str] = {}
         self.recording_to_session: Dict[str, str] = {}
+        # Track pre-Stasis channels by protocol_id (for early failure detection)
+        self.protocol_id_to_session: Dict[str, str] = {}
         self.lock = asyncio.Lock()
         # Inbound is allowed for all; we keep the set for mapping/priority.
         self.inbound_lines = [self._normalize_number(n) for n in (allowed_inbound_numbers or []) if n]
@@ -91,6 +93,12 @@ class SessionManager:
         async with self.lock:
             self.channel_to_session[channel_id] = session_id
 
+    async def register_protocol_id(self, session_id: str, protocol_id: str) -> None:
+        """Register protocol_id for early failure detection before channel enters Stasis."""
+        async with self.lock:
+            self.protocol_id_to_session[protocol_id] = session_id
+        logger.debug("Registered protocol_id=%s for session=%s", protocol_id, session_id)
+
     async def _get_session_by_channel(self, channel_id: str) -> Optional[Session]:
         async with self.lock:
             session_id = self.channel_to_session.get(channel_id)
@@ -125,7 +133,7 @@ class SessionManager:
             await self._handle_stasis_end(event)
         elif event_type == "Dial":
             # Visibility into pre-Stasis dial failures (cause/dialstatus may appear here).
-            logger.info("Dial event: %s", event)
+            await self._handle_dial_event(event)
         else:
             logger.debug("Unhandled event type: %s", event_type)
 
@@ -307,10 +315,31 @@ class SessionManager:
     async def _handle_hangup(self, event: dict) -> None:
         channel = event.get("channel", {})
         channel_id = channel.get("id")
+        protocol_id = channel.get("protocol_id")
+
         # ARI sometimes provides cause/cause_txt on the event or on the channel payload.
         cause = event.get("cause") or channel.get("cause")
         cause_txt = event.get("cause_txt") or channel.get("cause_txt")
+
+        # Try to find session by channel_id first
         session = await self._get_session_by_channel(channel_id)
+
+        # If not found and we have protocol_id, try to find via protocol_id mapping
+        if not session and protocol_id:
+            async with self.lock:
+                session_id = self.protocol_id_to_session.get(protocol_id)
+            if session_id:
+                session = await self.get_session(session_id)
+                if session:
+                    logger.info("Matched pre-Stasis hangup via protocol_id=%s to session=%s cause=%s",
+                               protocol_id, session_id, cause)
+                    # Store the cause in metadata if not already present
+                    async with session.lock:
+                        if not session.metadata.get("hangup_cause"):
+                            session.metadata["hangup_cause"] = str(cause) if cause else None
+                        if not session.metadata.get("hangup_cause_txt"):
+                            session.metadata["hangup_cause_txt"] = cause_txt
+
         if not session:
             return
         leg = self._find_leg(session, channel_id)
@@ -351,16 +380,21 @@ class SessionManager:
                 f"{t_answer_to_hang:.3f}" if t_answer_to_hang is not None else "na",
                 f"{t_yes_to_hang:.3f}" if t_yes_to_hang is not None else "na",
             )
+        # Check if this was a pre-Stasis failure or has failure cause codes
+        pre_stasis_failure = session.metadata.get("pre_stasis_failure") == "1"
+        busy_like = {"17", "18", "19", "20", "21", "34", "41", "42", "38"}  # Added 38 (Network out of order)
+
         # If we have a clear failure cause (busy/congest/power-off/banned), notify scenario before hangup finish.
-        busy_like = {"17", "18", "19", "20", "21", "34", "41", "42"}
         if self.scenario_handler and (
-            (cause and (str(cause) in busy_like or cause in {17, 18, 19, 20, 21, 34, 41, 42}))
-            or (cause_txt and any(x in cause_txt.lower() for x in ["busy", "congest"]))
+            pre_stasis_failure
+            or (cause and (str(cause) in busy_like or cause in {17, 18, 19, 20, 21, 34, 38, 41, 42}))
+            or (cause_txt and any(x in cause_txt.lower() for x in ["busy", "congest", "network"]))
         ):
             try:
-                await self.scenario_handler.on_call_failed(
-                    session, reason=(cause_txt or (str(cause) if cause is not None else None))
-                )
+                # Use dialstatus if available for more accurate failure reason
+                dialstatus = session.metadata.get("dialstatus", "")
+                reason = cause_txt or (str(cause) if cause is not None else None) or dialstatus
+                await self.scenario_handler.on_call_failed(session, reason=reason)
             except Exception as exc:  # best-effort; don't block cleanup
                 logger.debug("on_call_failed during hangup failed for %s: %s", session.session_id, exc)
 
@@ -404,6 +438,69 @@ class SessionManager:
                     session_id = self.channel_to_session.get(channel_id)
                     if session_id:
                         self.playback_to_session[playback_id] = session_id
+
+    async def _handle_dial_event(self, event: dict) -> None:
+        """
+        Handle Dial events to track pre-Stasis channel failures.
+        Extracts protocol_id and SIP Reason headers for busy/congestion detection.
+        Maps both peer and originating channels to sessions.
+        """
+        peer = event.get("peer", {})
+        peer_id = peer.get("id")
+        peer_protocol_id = peer.get("protocol_id")
+        dialstatus = event.get("dialstatus", "")
+
+        # Find session_id from protocol_id_to_session map (registered during originate)
+        session_id = None
+        async with self.lock:
+            # Check all protocol_id mappings to find our session
+            for protocol_id, sid in self.protocol_id_to_session.items():
+                session_id = sid
+                break  # Use first/latest
+
+        if not session_id:
+            logger.debug("Dial event without known session: %s", event)
+            return
+
+        # Also register the peer channel's protocol_id and id for hangup tracking
+        if peer_protocol_id:
+            async with self.lock:
+                self.protocol_id_to_session[peer_protocol_id] = session_id
+        if peer_id:
+            async with self.lock:
+                self.channel_to_session[peer_id] = session_id
+
+        # Check for failure dialstatus
+        if dialstatus in {"BUSY", "NOANSWER", "CONGESTION", "CHANUNAVAIL"}:
+            session = await self.get_session(session_id)
+            if session:
+                # Extract SIP cause code from Reason header if present
+                cause = peer.get("cause")
+                cause_txt = peer.get("cause_txt")
+
+                # Map dialstatus to failure reason
+                reason = cause_txt or (str(cause) if cause else None) or dialstatus
+                logger.info("Pre-Stasis dial failure: session=%s dialstatus=%s cause=%s peer_id=%s",
+                           session_id, dialstatus, reason, peer_id)
+
+                # Store failure info in session metadata
+                async with session.lock:
+                    session.metadata["pre_stasis_failure"] = "1"
+                    session.metadata["dialstatus"] = dialstatus
+                    if cause:
+                        session.metadata["hangup_cause"] = str(cause)
+                    if cause_txt:
+                        session.metadata["hangup_cause_txt"] = cause_txt
+
+                # Notify scenario handler immediately on NOANSWER or BUSY
+                if self.scenario_handler and dialstatus in {"BUSY", "NOANSWER"}:
+                    try:
+                        await self.scenario_handler.on_call_failed(session, reason=reason)
+                    except Exception as exc:
+                        logger.debug("on_call_failed from Dial event failed for %s: %s", session_id, exc)
+
+        logger.debug("Dial event: session=%s peer_id=%s peer_protocol_id=%s dialstatus=%s",
+                    session_id, peer_id, peer_protocol_id, dialstatus)
 
     async def _handle_stasis_end(self, event: dict) -> None:
         channel = event.get("channel", {})
@@ -449,6 +546,9 @@ class SessionManager:
             for recording_name, session_id in list(self.recording_to_session.items()):
                 if session_id == session.session_id:
                     del self.recording_to_session[recording_name]
+            for protocol_id, session_id in list(self.protocol_id_to_session.items()):
+                if session_id == session.session_id:
+                    del self.protocol_id_to_session[protocol_id]
             self.sessions.pop(session.session_id, None)
 
         # If this session was waiting for capacity, clear its marker.

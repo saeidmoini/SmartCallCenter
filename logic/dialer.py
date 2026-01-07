@@ -268,12 +268,18 @@ class Dialer:
             )
             endpoint = self._build_endpoint(contact, line)
             app_args = f"outbound,{session.session_id}"
-            await self.ari_client.originate_call(
+            # Originate returns channel info including protocol_id for early failure tracking
+            channel_info = await self.ari_client.originate_call(
                 endpoint=endpoint,
                 app_args=app_args,
                 caller_id=self._caller_id_for_line(line),
                 timeout=self.settings.dialer.origination_timeout,
             )
+            # Register protocol_id for pre-Stasis failure detection
+            if channel_info:
+                protocol_id = channel_info.get("id") or channel_info.get("protocol_id")
+                if protocol_id:
+                    await self.session_manager.register_protocol_id(session.session_id, protocol_id)
             self._schedule_timeout_watch(session.session_id)
             async with self.lock:
                 stats = self.line_stats.get(line)
