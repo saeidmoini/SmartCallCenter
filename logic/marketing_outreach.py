@@ -247,7 +247,14 @@ class MarketingScenario(BaseScenario):
             await self._stop_onhold_playbacks(session)
             async with session.lock:
                 yes_intent = session.metadata.get("intent_yes") == "1"
-            result_value = "disconnected" if yes_intent else "hangup"
+            # Check if operator origination already set failed:operator_failed
+            current_result = session.result
+            if current_result and current_result.startswith("failed:operator"):
+                # Keep the failed:operator_failed result, don't override
+                result_value = current_result
+            else:
+                # No specific operator failure set, use disconnected/hangup
+                result_value = "disconnected" if yes_intent else "hangup"
             await self._set_result(session, result_value, force=True, report=True)
             await self._hangup(session)
             return
@@ -520,25 +527,43 @@ class MarketingScenario(BaseScenario):
                 await self._handle_no_response(session, phase, on_yes, on_no, reason="intent_unknown")
         except Exception as exc:
             logger.exception("Transcription failed (%s) for session %s: %s", phase, session.session_id, exc)
-            # If Vira returned balance error, pause dialer and alert immediately.
+            # If Vira returned balance/quota error (403 or balance messages), pause dialer and alert immediately.
             msg = str(exc)
-            if "balanceError" in msg or "credit is below the set threshold" in msg:
+            is_vira_quota_error = False
+
+            # Check for 403 status code or balance/quota error messages
+            if "403" in msg or "balanceError" in msg or "credit is below the set threshold" in msg:
+                is_vira_quota_error = True
+
+            # Also check if it's an HTTP 403 error from requests
+            if hasattr(exc, "response") and exc.response is not None:
+                if exc.response.status_code == 403:
+                    is_vira_quota_error = True
+
+            if is_vira_quota_error:
                 async with session.lock:
                     session.metadata["panel_last_status"] = "FAILED"
+                await self._set_result(session, "failed:vira_quota", force=True, report=True)
                 if self.dialer:
+                    # Force immediate pause/alert like LLM quota exhaustion
+                    threshold = self.dialer.settings.sms.fail_alert_threshold
+                    self.dialer.failure_streak = max(self.dialer.failure_streak, threshold)
                     await self.dialer.on_result(
                         session.session_id,
-                        "failed:stt_balance",
+                        "failed:vira_quota",
                         session.metadata.get("number_id"),
                         session.metadata.get("contact_number"),
                         session.metadata.get("batch_id"),
                         session.metadata.get("attempted_at"),
                     )
+                await self._hangup(session)
+                await self.session_manager._cleanup_session(session)
+                return
+
             # If Vira says empty audio, treat as user hangup.
             if "Empty Audio file" in msg or "Input file content is unexpected" in msg:
                 await self._set_result(session, "hangup", force=True, report=True)
                 return
-            await self._handle_no_response(session, phase, on_yes, on_no, reason="stt_failure")
             await self._handle_no_response(session, phase, on_yes, on_no, reason="stt_failure")
 
     async def _detect_intent(self, transcript: str) -> str:
@@ -1028,14 +1053,22 @@ class MarketingScenario(BaseScenario):
             status = "HANGUP"
             reason = "Caller hung up"
         elif result == "disconnected":
-            status = "DISCONNECTED"
-            reason = "Caller said yes but disconnected before operator answered"
+            # In Salehi scenario: disconnected = success (user said yes, no operator transfer)
+            # In Agrad scenario: disconnected = failure (operator transfer failed)
+            if self.settings.scenario.transfer_to_operator:
+                # Agrad: operator transfer failed
+                status = "DISCONNECTED"
+                reason = "Caller said yes but disconnected before operator answered"
+            else:
+                # Salehi: user said yes and call ended successfully (no operator transfer)
+                status = "CONNECTED"
+                reason = "User said yes (no operator transfer in this scenario)"
         elif result == "unknown":
             status = "UNKNOWN"
             reason = "Unknown intent"
         elif result.startswith("failed:stt_failure"):
-            status = "HANGUP"
-            reason = "User hangup (STT could not transcribe)"
+            status = "NOT_INTERESTED"
+            reason = "User did not respond (STT could not transcribe)"
         elif result.startswith("failed:") or result == "failed":
             status = "FAILED"
             reason = result
