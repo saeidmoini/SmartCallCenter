@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -54,6 +55,7 @@ class Dialer:
                 "attempts": deque(),
                 "daily": 0,
                 "daily_marker": date.today(),
+                "last_originated_ts": 0.0,
             }
         self.attempt_timestamps: Deque[datetime] = deque()  # global per-minute
         self.daily_counter = 0  # global per-day
@@ -71,6 +73,8 @@ class Dialer:
         self.session_line: dict[str, str] = {}
         self.inbound_session_line: dict[str, str] = {}
         self.waiting_inbound: dict[str, int] = {}
+        # When an operator leg is being placed, pause queue origination until it obtains a line.
+        self.operator_priority_requests: int = 0
 
     async def run(self, stop_event: asyncio.Event) -> None:
         if self._running:
@@ -84,6 +88,9 @@ class Dialer:
                 if self.paused_by_failures:
                     await asyncio.sleep(2)
                     continue
+                if self.operator_priority_requests > 0:
+                    await asyncio.sleep(0.05)
+                    continue
                 if not await self._can_start_call():
                     await asyncio.sleep(1)
                     continue
@@ -91,19 +98,6 @@ class Dialer:
                 if not contact:
                     await asyncio.sleep(5)
                     continue
-                # Throttle to the configured originates per second (global across lines).
-                rate_limit = self.settings.dialer.max_originations_per_second
-                if rate_limit > 0:
-                    now = asyncio.get_event_loop().time()
-                    if now - self.last_originate_window_start >= 1.0:
-                        self.last_originate_window_start = now
-                        self.originate_count_in_window = 0
-                    if self.originate_count_in_window >= rate_limit:
-                        # Sleep until the next second window.
-                        await asyncio.sleep(max(0, 1.0 - (now - self.last_originate_window_start)))
-                        self.last_originate_window_start = asyncio.get_event_loop().time()
-                        self.originate_count_in_window = 0
-                    self.originate_count_in_window += 1
                 await self._originate(contact)
                 await asyncio.sleep(0.05)
         finally:
@@ -287,6 +281,7 @@ class Dialer:
                     stats["active"] += 1
                     stats["attempts"].append(datetime.utcnow())
                     stats["daily"] += 1
+                    stats["last_originated_ts"] = time.monotonic()
                 if not hasattr(self, "session_line"):
                     self.session_line = {}
                 self.session_line[session.session_id] = line
@@ -328,6 +323,7 @@ class Dialer:
 
     def _available_line(self) -> Optional[str]:
         now = datetime.utcnow()
+        now_mono = time.monotonic()
         best = None
         best_load = None
         for line, stats in self.line_stats.items():
@@ -336,6 +332,10 @@ class Dialer:
             self._prune_line_attempts(stats)
             if self.waiting_inbound.get(line, 0) > 0:
                 # Hold outbound when inbound callers are waiting for this line.
+                continue
+            last_ts = stats.get("last_originated_ts", 0.0)
+            if last_ts and now_mono - last_ts < 1.0:
+                # Enforce per-line per-second cap of 1.
                 continue
             total_active = self._line_active_total(stats)
             if total_active >= self.settings.dialer.max_concurrent_calls:
@@ -438,6 +438,14 @@ class Dialer:
 
         size = min(self.settings.dialer.batch_size, capacity)
         batch: NextBatchResponse = await self.panel_client.get_next_batch(size=size)
+        # Refresh operator roster from panel active_agents if configured.
+        if self.settings.operator.use_panel_agents and batch.agents:
+            handler = self.session_manager.scenario_handler
+            if handler and hasattr(handler, "set_panel_agents"):
+                try:
+                    await handler.set_panel_agents(batch.agents)
+                except Exception as exc:
+                    logger.warning("Failed to set panel agents: %s", exc)
         if batch.call_allowed and self.paused_by_failures:
             logger.info("Panel re-enabled; resuming dialer after failures.")
             self.paused_by_failures = False

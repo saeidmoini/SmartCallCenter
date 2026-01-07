@@ -73,6 +73,7 @@ class OperatorSettings:
     timeout: int
     endpoint: str
     mobile_numbers: List[str]
+    use_panel_agents: bool
 
 
 @dataclass
@@ -120,6 +121,20 @@ class SMSSettings:
 
 
 @dataclass
+class ScenarioSettings:
+    """
+    Scenario configuration to support different call flows.
+
+    Scenarios:
+    - salehi: On YES intent, play "yes" prompt then disconnect (no operator transfer)
+    - agrad: On YES intent, play "yes" + "onhold" then connect to operator
+    """
+    name: str  # "salehi" or "agrad"
+    transfer_to_operator: bool  # Whether to transfer YES intents to operator
+    audio_src_dir: str  # Scenario-specific audio source directory
+
+
+@dataclass
 class Settings:
     ari: AriSettings
     gapgpt: GapGPTSettings
@@ -131,6 +146,7 @@ class Settings:
     concurrency: ConcurrencySettings
     timeouts: TimeoutSettings
     sms: SMSSettings
+    scenario: ScenarioSettings
     log_level: str
 
 
@@ -200,6 +216,7 @@ def get_settings() -> Settings:
         timeout=int(os.getenv("OPERATOR_TIMEOUT", "30")),
         endpoint=os.getenv("OPERATOR_ENDPOINT", ""),
         mobile_numbers=_parse_list(os.getenv("OPERATOR_MOBILE_NUMBERS", "")),
+        use_panel_agents=os.getenv("USE_PANEL_AGENTS", "false").lower() == "true",
     )
 
     panel = PanelSettings(
@@ -235,6 +252,14 @@ def get_settings() -> Settings:
         fail_alert_threshold=int(os.getenv("FAIL_ALERT_THRESHOLD", "3")),
     )
 
+    # Scenario configuration
+    scenario_name = os.getenv("SCENARIO", "salehi").lower()
+    scenario = ScenarioSettings(
+        name=scenario_name,
+        transfer_to_operator=(scenario_name == "agrad"),
+        audio_src_dir=f"assets/audio/{scenario_name}/src",
+    )
+
     log_level = os.getenv("LOG_LEVEL", "INFO")
 
     return Settings(
@@ -248,5 +273,6 @@ def get_settings() -> Settings:
         concurrency=concurrency,
         timeouts=timeouts,
         sms=sms,
+        scenario=scenario,
         log_level=log_level,
     )
