@@ -411,11 +411,13 @@ await panel_client.report_result(
 6. Classify Intent via LLM
    ↓
 7. Intent Routing:
-   ├─ YES → Play "yes" → Disconnect (Salehi branch)
-   ├─ NO → Play "goodby" → Hangup
+   ├─ YES → Play "yes" → Wait for playback → Mark as connected → Disconnect (Salehi)
+   ├─ NO → Play "goodby" → Wait for playback → Hangup
    ├─ NUMBER_QUESTION → Play "number" → Record again → Loop to step 4
-   └─ UNKNOWN → Play "goodby" → Hangup
+   └─ UNKNOWN → Play "goodby" → Wait for playback → Hangup
 ```
+
+**Important**: The system waits for audio prompts to finish playing before proceeding. This is handled via Asterisk's PlaybackFinished events, not hardcoded delays. This ensures prompts of any duration (5 sec, 1 min, etc.) play completely before the next action.
 
 **Audio Enhancement Pipeline**:
 
@@ -499,16 +501,20 @@ The system maps call outcomes to these standardized codes:
 
 | Code | Description |
 |------|-------------|
-| `connected_to_operator` | Customer said yes, operator answered (Agrad branch) |
-| `disconnected` | Customer said yes but hung up or operator unavailable (Salehi branch) |
+| `connected_to_operator` | Customer said yes - Agrad: operator answered; Salehi: successful interest |
+| `disconnected` | Customer hung up during call flow or operator unavailable (Agrad) |
 | `not_interested` | Customer said no |
 | `hangup` | Customer hung up before response |
 | `missed` | No answer / busy / timeout |
 | `unknown` | Unclear intent |
 | `busy` | SIP cause 17 (busy) |
-| `power_off` | SIP cause 18/19/20 (power off) |
-| `banned` | SIP cause 21/34/41/42 (rejected) |
+| `power_off` | SIP cause 18/19/20/38 (power off / Iran telecom ambiguous rejection) |
+| `banned` | SIP cause 21/34/41/42 (rejected/blocked by operator) |
 | `failed:<reason>` | Technical failures (STT, LLM, recording) |
+
+**Note on SIP Cause Codes**:
+- **Cause 38**: Iran telecom (Asiatech) returns cause=38 for ALL rejections (invalid number, busy, power off). System treats all cause=38 as `power_off` to avoid retrying invalid numbers.
+- **Cause 21**: High rejection rate indicates hitting concurrent call limits with trunk provider.
 
 **Failure Handling**:
 
@@ -556,14 +562,16 @@ async def connect_to_operator(session: Session)  # Disabled on Salehi
 **Branch-Specific Behavior**:
 
 **Salehi Branch** (current):
-- YES intent → Play "yes" → Disconnect
-- Result: `disconnected`
+- YES intent → Play "yes" → Wait for PlaybackFinished → Mark as `connected_to_operator` → Disconnect
+- Result: `connected_to_operator` (indicates successful/interested customer)
 - No operator transfer
+- System waits for audio to finish before disconnecting
 
 **Agrad Branch**:
-- YES intent → Play "yes" + "onhold" → Connect to operator
-- Result: `connected_to_operator` or `disconnected`
+- YES intent → Play "yes" → Wait for PlaybackFinished → Play "onhold" → Connect to operator
+- Result: `connected_to_operator` (if operator answers) or `disconnected` (if operator unavailable)
 - Round-robin agent selection
+- System ensures "yes" plays completely before ringing operator
 
 ---
 
@@ -945,6 +953,66 @@ exten => _X.,1,Stasis(salehi)
 - All calls entering `from-internal` or `from-trunk` contexts are sent to the `salehi` Stasis application
 - The application name must match `ARI_APP_NAME` in your `.env` file
 - Asterisk will send events to the WebSocket at `ws://127.0.0.1:8088/ari/events?app=salehi`
+
+---
+
+## Recent Improvements and Bug Fixes
+
+### Playback Completion Handling (2026-01-08)
+
+**Problem**: System was disconnecting calls before audio prompts finished playing.
+- Used hardcoded `asyncio.sleep(2)` delay instead of waiting for actual playback completion
+- Resulted in customers hearing partial prompts before being disconnected
+- In Agrad scenario: operators would answer to empty lines (customer already gone)
+
+**Solution**: Implemented event-driven playback completion handling.
+- Removed manual delays from `_handle_yes()` and other handlers
+- System now waits for Asterisk's `PlaybackFinished` events
+- Works for any prompt duration (5 sec, 1 min, etc.)
+- `on_playback_finished()` handler manages call flow transitions
+
+**Flow**:
+```python
+# Before (broken):
+await _play_prompt("yes")
+await asyncio.sleep(2)  # Hardcoded delay
+await hangup()
+
+# After (correct):
+await _play_prompt("yes")  # Triggers playback
+# ... wait for PlaybackFinished event ...
+# on_playback_finished() handles next steps automatically
+```
+
+### SIP Cause Code Detection (2026-01-08)
+
+**Problem**: Iran telecom (Asiatech) returns SIP cause=38 for ALL rejections.
+- Invalid numbers (should be cause=1) → returns cause=38
+- Phone powered off (should be cause=20) → returns cause=38
+- Real busy signals (should be cause=17) → returns cause=38
+- Cannot distinguish between different failure types
+
+**Solution**: Treat all cause=38 as `power_off` to avoid retrying invalid numbers.
+```python
+# Cause code mapping:
+elif hangup_cause == "38":
+    result_value = "power_off"  # Safer than "busy" - avoids retrying invalid numbers
+```
+
+**Additional Fixes**:
+- Added deduplication check in `on_call_failed()` to prevent duplicate processing
+- Fixed pre-Stasis failure detection using protocol_id tracking
+- Improved Dial event processing to capture dialstatus and cause codes
+- Added comprehensive logging for hangup events and user drop timing
+
+### Known Limitations
+
+**ARI Limitation**: Cannot capture early cause codes from SIP 183 Progress messages.
+- ARI's Dial events don't expose SIP Reason headers from 183 messages
+- The `peer.cause` field only appears in final failure events (NOANSWER, BUSY)
+- Cannot distinguish cause=38 subtypes due to Iran telecom behavior
+
+**Workaround**: All cause=38 treated as `power_off` (safer default for avoiding retries).
 
 ---
 
