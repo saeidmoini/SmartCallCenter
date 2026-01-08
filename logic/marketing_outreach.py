@@ -331,6 +331,11 @@ class MarketingScenario(BaseScenario):
             if early_cause in {"18", "19", "20"}:
                 logger.info("Phone off detected: session=%s early_cause=%s -> power_off",
                            session.session_id, early_cause)
+        # Cause 0: Unknown/no cause available (treat as power_off to avoid retries)
+        elif actual_cause == "0":
+            result_value = "power_off"
+            logger.info("Unknown cause detected: session=%s early_cause=%s -> power_off",
+                       session.session_id, early_cause)
         # Cause 3, 22, 27: No route/number changed/destination out of order
         elif actual_cause in {"3", "22", "27"}:
             result_value = "power_off"

@@ -486,8 +486,8 @@ class SessionManager:
             session = await self.get_session(session_id)
             if session:
                 cause = peer.get("cause")
-                # Only capture meaningful early causes (1, 17, 20, etc.)
-                if cause and cause in {1, 17, 18, 19, 20, 3, 22, 27}:
+                # Capture early causes including 0 (unknown), 1, 17, 18, 19, 20, etc.
+                if cause is not None and cause in {0, 1, 17, 18, 19, 20, 3, 22, 27}:
                     async with session.lock:
                         # Store early cause only if we don't have one yet
                         if not session.metadata.get("early_cause"):
