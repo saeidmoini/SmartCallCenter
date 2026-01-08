@@ -253,8 +253,8 @@ class MarketingScenario(BaseScenario):
                 await asyncio.sleep(0.5)
                 await self._connect_to_operator(session)
             else:
-                # Salehi scenario: customer said yes, mark as disconnected and end call
-                await self._set_result(session, "disconnected", force=True, report=True)
+                # Salehi scenario: customer said yes, mark as connected (successful) and end call
+                await self._set_result(session, "connected_to_operator", force=True, report=True)
                 await self._hangup(session)
         elif prompt_key == "number":
             await self._capture_response(
