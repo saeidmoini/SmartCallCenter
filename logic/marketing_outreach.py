@@ -327,17 +327,14 @@ class MarketingScenario(BaseScenario):
         # Cause 0, 1, 3, 22, 27: Unknown/invalid/no route
         elif hangup_cause in {"0", "1", "3", "22", "27"}:
             result_value = "power_off"
-        # Iran-specific: NOANSWER with cause=38
+        # Iran-specific: ALL cause=38 treated as power_off
         # cause=38 is "Network out of order" which Iran carriers use for ALL rejections
-        # Unfortunately we cannot distinguish between busy/power_off/invalid when cause=38
-        elif dialstatus == "NOANSWER" and hangup_cause == "38":
-            # Default to power_off since we can't tell - safer than marking as busy
-            result_value = "power_off"
-            logger.info("Iran telecom cause=38 (ambiguous): session=%s dialstatus=%s -> power_off (could be busy/off/invalid)",
-                       session.session_id, dialstatus)
-        # Cause 38 without NOANSWER dialstatus is congestion/busy
+        # (invalid number, busy, power off - all return cause=38)
+        # Mark as power_off to avoid retrying invalid/off numbers
         elif hangup_cause == "38":
-            result_value = "busy"
+            result_value = "power_off"
+            logger.info("Iran telecom cause=38 (ambiguous) -> power_off: session=%s dialstatus=%s (could be busy/off/invalid)",
+                       session.session_id, dialstatus)
         # Cause 21, 34, 41, 42: Rejected/blocked by operator
         elif hangup_cause in {"21", "34", "41", "42"}:
             result_value = "banned"
